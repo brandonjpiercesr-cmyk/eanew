@@ -147,6 +147,8 @@ async function essenceTap(cycleId) {
 
 // ── MAIN CYCLE ─────────────────────────────────────────────────────────────────
 async function runCycle() {
+  var _startTime = Date.now();
+  var _hamUid = process.env.EANEW_HAM_UID || 'DC499D0C';
   var cycleId = 'eanew_' + Date.now();
   console.log('[EANEW] Cycle start:', cycleId);
 
@@ -251,6 +253,100 @@ app.post('/eanew/report', async function(req, res) {
 });
 
 // ── AUTO-LOOP: recursive, never setInterval ──────────────────────────────────
+
+
+// ── AGENT MAP (embedded context so EANEW knows who does what) ──────────────
+var AGENT_MAP = {
+  'CANEW': { role: 'coding dept -- builds files, commits, deploys', tier: 'C3' },
+  'MACE': { role: 'architecture decisions on multi-file or ambiguous questions', tier: 'C2' },
+  'CANON': { role: 'grades code against Wonder Contract', tier: 'C2' },
+  'SPAN': { role: 'roadmap sequencer', tier: 'C2' },
+  'PAM': { role: 'privacy gate before output exits', tier: 'C2' },
+  'SHADOW': { role: 'hallucination check', tier: 'C2' },
+  'WRIT': { role: 'voice law, no em dash, Coffee Shop Test', tier: 'C2' },
+  'THINK': { role: 'deep deliberation on complex problems', tier: 'C2' },
+  'IMAN': { role: 'email advisor -- stamps inbox results to brain, never queried directly', tier: 'C2' },
+  'WREN': { role: 'SMS monitor -- stamps results to brain, never queried directly', tier: 'C2' },
+  'ANU': { role: 'face -- reads EANEW RESULT BEADs and routes to channel', tier: 'C3_face' },
+  'TIM': { role: 'C0 substrate ONNX confidence scorer', tier: 'C0' }
+};
+
+function getAgentContext() {
+  return Object.keys(AGENT_MAP).map(function(k) { return k + ': ' + AGENT_MAP[k].role; }).join('. ');
+}
+
+// ── JUDGMENT LAYER ────────────────────────────────────────────────────────
+async function lifeCheck(hamUid) {
+  var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
+  if (!BU || !BK) return { ok: false, reason: 'no_brain' };
+  var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
+
+  // Read last 20 stamps -- what did the team do?
+  var recentRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=in.(LOGFUL,RESULT,AIR_CYCLE)&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=20', { headers: hdrs })
+    .then(function(r) { return r.json(); }).catch(function() { return []; });
+
+  // Classify findings
+  var findings = { holds: [], errors: [], needs_brandon: [], normal: [] };
+  recentRows.forEach(function(row) {
+    var s = (row.summary || '').toLowerCase();
+    if (s.includes('hold') || s.includes('canon_hold') || s.includes('canon_gap')) findings.holds.push(row.summary);
+    else if (s.includes('error') || s.includes('fail') || s.includes('unreachable')) findings.errors.push(row.summary);
+    else if (s.includes('for_brandon') || s.includes('needs_attention')) findings.needs_brandon.push(row.summary);
+    else findings.normal.push(row.summary);
+  });
+
+  // Dispatch: compose task from observation if holds exist
+  if (findings.holds.length > 0) {
+    var holdSummary = findings.holds.slice(0, 3).join('; ');
+    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST',
+      headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'DIRECTIVE',
+        acl_stamp: '\u2b21B:eanew.dispatch.hold:DIRECTIVE:composed:20260617\u2b21',
+        source: 'eanew.dispatch.hold.' + Date.now(),
+        content: JSON.stringify({ composed_by: 'EANEW_lifeCheck', holds_found: findings.holds, action: 'review_and_retry', agent_context: getAgentContext() }),
+        summary: '[EANEW] Dispatch: ' + findings.holds.length + ' hold(s) -- ' + holdSummary.slice(0, 60),
+        importance: 8 }) }).catch(function() {});
+  }
+
+  // Surface: if errors or needs_brandon, stamp for A'NU
+  if (findings.needs_brandon.length > 0 || findings.errors.length > 0) {
+    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST',
+      headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'RESULT',
+        acl_stamp: '\u2b21B:eanew.surface.brandon:RESULT:needs_attention:20260617\u2b21',
+        source: 'eanew.surface.' + Date.now(),
+        content: JSON.stringify({ for_anu: true, errors: findings.errors, needs_brandon: findings.needs_brandon }),
+        summary: '[EANEW] Surface to A\'NU: ' + (findings.errors.length + findings.needs_brandon.length) + ' item(s) need attention',
+        importance: 9 }) }).catch(function() {});
+  }
+
+  return { ok: true, status: 'life_check', findings: { holds: findings.holds.length, errors: findings.errors.length, needs_brandon: findings.needs_brandon.length, normal: findings.normal.length }, dispatched: findings.holds.length > 0, surfaced: (findings.needs_brandon.length + findings.errors.length) > 0 };
+}
+
+// ── MEETING MINUTES ───────────────────────────────────────────────────────
+async function stampMeetingMinutes(hamUid, cycleResult, startTime) {
+  var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
+  if (!BU || !BK) return;
+  var elapsed = Date.now() - startTime;
+  var narrative = '';
+  if (cycleResult && cycleResult.session) {
+    narrative = 'I woke up and checked SPAN. Session ' + cycleResult.session + ' was ready. I dispatched to CANEW. Verdict: ' + (cycleResult.verdict || 'unknown') + '. ' + (cycleResult.path ? 'Built: ' + cycleResult.path + '. ' : '') + 'Tapped aibebase. Done in ' + elapsed + 'ms.';
+  } else if (cycleResult && cycleResult.status === 'life_check') {
+    var f = cycleResult.findings || {};
+    narrative = 'I woke up. SPAN had nothing. I went around the room -- read LOGFUL, found ' + (f.holds||0) + ' hold(s), ' + (f.errors||0) + ' error(s), ' + (f.normal||0) + ' normal. ' + (cycleResult.dispatched ? 'Dispatched fix task. ' : '') + (cycleResult.surfaced ? 'Surfaced to A\'NU. ' : '') + 'Tapped aibebase. Done in ' + elapsed + 'ms.';
+  } else {
+    narrative = 'I ran my cycle in ' + elapsed + 'ms. Result: ' + JSON.stringify(cycleResult||{}).slice(0, 80);
+  }
+  await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST',
+    headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'LOGFUL',
+      acl_stamp: '\u2b21B:eanew.meeting.minutes:LOGFUL:cycle_log:20260617\u2b21',
+      source: 'eanew.minutes.' + Date.now(),
+      content: JSON.stringify({ narrative: narrative, elapsed_ms: elapsed }),
+      summary: '[EANEW MINUTES] ' + narrative.slice(0, 100),
+      importance: 6 }) }).catch(function() {});
+}
+
 async function autoLoop() {
   try {
     if (!CYCLE_RUNNING) { await runCycle(); }
