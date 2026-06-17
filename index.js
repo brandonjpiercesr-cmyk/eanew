@@ -1,52 +1,89 @@
-// ⬡B:eanew.entry:MODULE:autonomous_watcher:20260617⬡
-// EANEW — The autonomous watcher. C3 lung. Separate from CANEW.
+// ⬡B:eanew.entry:MODULE:autonomous_watcher_v2:20260617⬡
+// EANEW v2 — reads SPAN completion map, dispatches predefined session tasks to CANEW.
 // Model: google/gemini-3.1-flash-lite via OpenRouter.
-// EANEW fires CANEW with tasks. EANEW reads CANEW's RESULT BEADs. EANEW runs the cycle.
-// EANEW is the lung that never stops. CANEW is the department that builds when called.
-// Repo: brandonjpiercesr-cmyk/eanew. Never merged with canew or aibebase.
+// Separate service from CANEW. Never merged.
 
 var express = require('express');
 var app = express();
 app.use(express.json());
 
 var DOCTRINE_BIBLE = null;
-var SPAN_STATE = null;
 var CYCLE_RUNNING = false;
 
-// ── LOAD DOCTRINE BIBLE (from CANEW repo) ─────────────────────────────────────
+// ── PREDEFINED SESSION TASK MAP ───────────────────────────────────────────────
+// Each session has an exact task. EANEW picks the task for the next PENDING session.
+// CANEW builds it. No improvisation. Run of Show is code, not LLM output.
+var SESSION_TASKS = {
+  'B4': 'Build coding-department/canon/canon-grader.js\n\nThis is EANEW\'s independent CANON grader. EANEW calls this after CANEW builds a file.\n\nExports: async function canonGrade(filePath, sessionId, hamUid)\n\nLogic:\n1. Read the file from GitHub:\n   GET https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/ + filePath + ?ref=main\n   Headers: { Authorization: \'token \' + process.env.GITHUB_TOKEN, Accept: \'application/vnd.github+json\' }\n   If 404: return { verdict: \'CANON_GAP\', gaps: [{ reason: \'file_not_found\', line: 0 }] }\n   Decode base64 content.\n\n2. Cold code checks (no LLM, instant):\n   - Has ACL stamp in first 3 lines: /\u2b21B:/.test(firstLines)\n   - Has module.exports: /module\\.exports/.test(code)\n   - No hardcoded HAM UIDs: !/\\b[0-9A-F]{8}\\b/.test(code) excluding comments\n   - No scaffold: !/(TODO|stub|placeholder|return \\{\\})/.test(code)\n   - No direct brain write bypassing LOGFUL pattern: !/\\/rest\\/v1\\/aibe_brain.*method.*POST/.test(code) OR /Content-Profile.*abacia_core/.test(code)\n\n3. Collect gaps from failed checks:\n   Each failed check adds: { clause: \'WC_clause_name\', line: 0, reason: \'description\' }\n\n4. Return { verdict: gaps.length === 0 ? \'CANON_PASS\' : \'CANON_GAP\', gaps, filePath, sessionId }\n\nmodule.exports = { canonGrade }\nNo scaffold. No hardcoded values. 847392 test passes.',
+
+  'B5': 'Build coding-department/span/span-reader.js\n\nThis reads the SPAN completion map from the brain.\n\nExports: async function readSpanMap(hamUid)\n\nLogic:\n1. GET from brain: process.env.AIBE_BRAIN_URL + \'/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.\' + hamUid + \'&order=created_at.desc&limit=1\'\n   Headers: { apikey: process.env.AIBE_BRAIN_KEY, Authorization: \'Bearer \' + process.env.AIBE_BRAIN_KEY, \'Accept-Profile\': \'abacia_core\' }\n\n2. If no rows: return { ok: false, reason: \'no_span_map\' }\n\n3. Parse content JSON from rows[0].content\n\n4. Find the first PENDING session across all phases:\n   Loop through PhaseB, PhaseC, PhaseD, PhaseE, PhaseF, PhaseG, PhaseH, PhaseI, PhaseJ in order\n   Return first session with value === \'PENDING\'\n\n5. Return { ok: true, nextSession: sessionId, completionMap: parsed, nextPhase: phaseKey }\n\nmodule.exports = { readSpanMap }\nNo scaffold. No hardcoded values. 847392 test passes.',
+
+  'B6': 'Build core/essence-tap.js\n\nExports: async function essenceTap(cycleId, hamUid, sourceLung)\n\nTaps the companion lung (aibebase) after EANEW completes a cycle.\n\nLogic:\n1. POST to process.env.AIBEBASE_URL + \'/air/start\'\n   Headers: { Content-Type: \'application/json\' }\n   Body: JSON.stringify({ source: \'eanew_tap\', cycleId, hamUid: hamUid || \'SYSTEM\', lung: sourceLung || \'lung_a\', ts: Date.now() })\n\n2. If POST fails: log error but do NOT throw -- essence tap failure never stops the cycle\n\n3. Also stamp a SEAL BEAD to brain:\n   POST process.env.AIBE_BRAIN_URL + \'/rest/v1/aibe_brain\'\n   Headers: Content-Profile: abacia_core (write headers)\n   Body: { ham_uid: hamUid || \'SYSTEM\', agent_global: \'AIR\', stamp_type: \'AIR_CYCLE\',\n     acl_stamp: \'⬡B:essence.cycle.\' + cycleId + \':SEAL:tap:20260617⬡\',\n     source: \'essence.cycle.\' + cycleId + \'.\' + Date.now(),\n     content: JSON.stringify({ cycleId, sourceLung: sourceLung || \'lung_a\', ts: Date.now() }),\n     summary: \'[AIR] Essence tap -- \' + (sourceLung || \'lung_a\') + \' cycle \' + cycleId,\n     importance: 8 }\n\n4. Return { ok: true, cycleId, tapped: \'aibebase\' }\n\nmodule.exports = { essenceTap }\nNo scaffold. No hardcoded values.',
+
+  'B7': 'Build anu/anu-reader.js\n\nA\'NU reads EANEW\'s RESULT BEADs and routes the summary to the correct channel.\n\nExports: async function anuRead(hamUid)\n\nLogic:\n1. GET from brain: process.env.AIBE_BRAIN_URL + \'/rest/v1/aibe_brain?agent_global=eq.EANEW&stamp_type=eq.RESULT&ham_uid=eq.\' + hamUid + \'&content=like.*for_anu*true*&order=created_at.desc&limit=1\'\n   Headers: Accept-Profile: abacia_core\n\n2. If no rows: return { ok: false, reason: \'no_eanew_result\' }\n\n3. Parse content JSON from rows[0].content\n   Extract: { sessionId, path, verdict, for_anu }\n   Read summary field from rows[0].summary\n\n4. Determine active channel (cold code, no LLM):\n   Check brain for a recent VARA_ACTIVE BEAD (within 60 seconds):\n   GET brain: stamp_type=eq.VARA_ACTIVE&order=created_at.desc&limit=1\n   If exists and created_at > now - 60000ms: channel = \'VARA\'\n   Else: channel = \'CC\' (command center)\n\n5. Stamp the routed summary to brain:\n   stamp_type: \'RESULT\', agent_global: \'ANU\'\n   acl_stamp: \'⬡B:anu.routed.\' + sessionId + \':RESULT:routed:20260617⬡\'\n   content: JSON.stringify({ sessionId, channel, summary: rows[0].summary, verdict })\n   summary: \'[ANU] Routed to \' + channel + \': \' + rows[0].summary.slice(0, 60)\n\n6. Return { ok: true, channel, summary: rows[0].summary, sessionId, verdict }\n\nmodule.exports = { anuRead }\nNo scaffold. No hardcoded values. 847392 test passes.'
+};
+
+// ── LOAD DOCTRINE BIBLE ────────────────────────────────────────────────────────
 async function loadDoctrineBible() {
   var GH = process.env.GITHUB_TOKEN;
-  if (!GH) { console.error('[EANEW] GITHUB_TOKEN missing'); return null; }
-  var url = 'https://api.github.com/repos/brandonjpiercesr-cmyk/canew/contents/doctrine/CANEW_DOCTRINE_BIBLE.md?ref=main';
-  var r = await fetch(url, { headers: { 'Authorization': 'token ' + GH, 'Accept': 'application/vnd.github+json' } });
-  if (!r.ok) { console.error('[EANEW] Doctrine fetch failed:', r.status); return null; }
+  if (!GH) return null;
+  var r = await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/canew/contents/doctrine/CANEW_DOCTRINE_BIBLE.md?ref=main',
+    { headers: { 'Authorization': 'token ' + GH, 'Accept': 'application/vnd.github+json' } });
+  if (!r.ok) return null;
   var data = await r.json();
   var content = Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf8');
-  console.log('[EANEW] Doctrine Bible loaded:', content.length, 'chars');
+  console.log('[EANEW] Doctrine loaded:', content.length, 'chars');
   return content;
 }
 
-// ── READ SPAN STATE from brain ─────────────────────────────────────────────────
-async function readSpanState() {
+// ── READ SPAN COMPLETION MAP ───────────────────────────────────────────────────
+async function readSpanMap() {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
   if (!BU || !BK) return null;
   var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
-  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&ham_uid=eq.DC499D0C&order=importance.desc,created_at.desc&limit=1', { headers: hdrs });
+  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1', { headers: hdrs });
   var rows = await r.json();
   if (!rows || !rows[0]) return null;
   try { return JSON.parse(rows[0].content); } catch(e) { return null; }
 }
 
-// ── READ RECENT CANEW RESULTS ───────────────────────────────────────────────────
-async function readCanewResults(limit) {
+// ── UPDATE SPAN MAP in brain ───────────────────────────────────────────────────
+async function updateSpanMap(spanMap, session, verdict) {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
-  if (!BU || !BK) return [];
-  var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
-  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.CANEW&stamp_type=eq.RESULT&ham_uid=eq.DC499D0C&order=created_at.desc&limit=' + (limit || 10), { headers: hdrs });
-  return await r.json();
+  // Find the phase containing this session and update it
+  ['PhaseB','PhaseC','PhaseD','PhaseE','PhaseF','PhaseG','PhaseH','PhaseI','PhaseJ'].forEach(function(phase) {
+    if (spanMap[phase] && spanMap[phase][session] !== undefined) {
+      spanMap[phase][session] = verdict;
+    }
+  });
+  // Find next pending
+  var nextSession = null;
+  var phases = ['PhaseB','PhaseC','PhaseD','PhaseE','PhaseF','PhaseG','PhaseH','PhaseI','PhaseJ'];
+  for (var i = 0; i < phases.length; i++) {
+    var p = spanMap[phases[i]];
+    if (p) {
+      var keys = Object.keys(p);
+      for (var j = 0; j < keys.length; j++) {
+        if (p[keys[j]] === 'PENDING') { nextSession = keys[j]; break; }
+      }
+    }
+    if (nextSession) break;
+  }
+  spanMap.next_session = nextSession;
+  // Write updated map to brain
+  await fetch(BU + '/rest/v1/aibe_brain', {
+    method: 'POST',
+    headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'SPAN',
+      acl_stamp: '\u2b21B:span.completion_map:DIRECTIVE:session_tracking:20260617\u2b21',
+      stamp_type: 'DIRECTIVE', source: 'span.completion_map.' + Date.now(),
+      content: JSON.stringify(spanMap),
+      summary: '[SPAN] Updated -- ' + session + '=' + verdict + ' next=' + nextSession, importance: 10 })
+  }).catch(function() {});
+  return spanMap;
 }
 
-// ── STAMP BEAD to brain ────────────────────────────────────────────────────────
+// ── STAMP BEAD ─────────────────────────────────────────────────────────────────
 async function stampBead(bead) {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
   if (!BU || !BK) return null;
@@ -59,237 +96,151 @@ async function stampBead(bead) {
   return rows[0];
 }
 
-// ── GEMINI 3.1 FLASH LITE via OpenRouter ──────────────────────────────────────
-async function eanewThink(systemPrompt, userMessage) {
-  var OR = process.env.OPENROUTER_API_KEY;
-  if (!OR) return null;
-  var r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + OR, 'Content-Type': 'application/json', 'HTTP-Referer': process.env.EANEW_URL || 'https://eanew.onrender.com' },
-    body: JSON.stringify({ model: 'google/gemini-3.1-flash-lite', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }], max_tokens: 1000 })
-  });
-  if (!r.ok) return null;
-  var data = await r.json();
-  return (data.choices && data.choices[0]) ? data.choices[0].message.content : null;
-}
-
-// ── FIRE CANEW with a task ──────────────────────────────────────────────────────
+// ── FIRE CANEW ─────────────────────────────────────────────────────────────────
 async function fireCanew(task, sessionId, retryReason) {
   var CANEW = process.env.CANEW_URL || 'https://canew.onrender.com';
   var payload = { task: task, hamUid: 'DC499D0C', sessionId: sessionId };
   if (retryReason) payload.retryReason = retryReason;
   var r = await fetch(CANEW + '/canew/build', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   });
-  var result = await r.json();
-  console.log('[EANEW→CANEW] sessionId=' + sessionId + ' ok=' + result.ok + ' path=' + result.path);
-  return result;
+  return await r.json();
 }
 
-// ── SIMPLE CANON CHECK (reads brain for PASS verdicts) ─────────────────────────
-async function canonCheck(path, sessionId) {
-  var AIBEBASE = process.env.AIBEBASE_URL || 'https://aibebase.onrender.com';
+// ── CANON GRADE (cold code checks — no LLM) ────────────────────────────────────
+async function canonGrade(filePath) {
+  if (!filePath) return { verdict: 'CANON_GAP', gaps: [{ reason: 'no_path' }] };
+  var GH = process.env.GITHUB_TOKEN;
   try {
-    var r = await fetch(AIBEBASE + '/canon/check', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: path, context: sessionId, hamUid: 'DC499D0C' })
-    });
-    if (!r.ok) return { verdict: 'CANON_GAP', gaps: [{ reason: 'canon_endpoint_error_' + r.status }] };
-    return await r.json();
+    var r = await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/' + filePath + '?ref=main',
+      { headers: { 'Authorization': 'token ' + GH, 'Accept': 'application/vnd.github+json' } });
+    if (!r.ok) return { verdict: 'CANON_GAP', gaps: [{ reason: 'file_not_found_' + r.status }] };
+    var data = await r.json();
+    var code = Buffer.from(data.content.replace(/\n/g,''), 'base64').toString('utf8');
+    var gaps = [];
+    var firstLines = code.split('\n').slice(0,5).join('\n');
+    if (!/\u2b21B:/.test(firstLines)) gaps.push({ clause: 'W6', reason: 'missing_acl_stamp' });
+    if (!/module\.exports/.test(code)) gaps.push({ clause: 'W5', reason: 'no_module_exports' });
+    if (/\b(DC499D0C|9B69CF65)\b/.test(code)) gaps.push({ clause: 'W2', reason: 'hardcoded_ham_uid' });
+    if (/(TODO|stub|placeholder)/.test(code)) gaps.push({ clause: 'W5', reason: 'scaffold_detected' });
+    return { verdict: gaps.length === 0 ? 'CANON_PASS' : 'CANON_GAP', gaps: gaps, filePath: filePath };
   } catch(e) {
-    // If CANON endpoint not live yet, check GitHub file exists as basic pass
-    return { verdict: 'CANON_PASS', gaps: [], note: 'canon_endpoint_pending' };
+    return { verdict: 'CANON_GAP', gaps: [{ reason: 'canon_exception_' + e.message.slice(0,50) }] };
   }
 }
 
-// ── ESSENCE TAP — tap aibebase lung after each cycle ───────────────────────────
+// ── ESSENCE TAP ────────────────────────────────────────────────────────────────
 async function essenceTap(cycleId) {
   var AIBEBASE = process.env.AIBEBASE_URL || 'https://aibebase.onrender.com';
   try {
-    var r = await fetch(AIBEBASE + '/air/start', {
+    await fetch(AIBEBASE + '/air/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: 'eanew_tap', cycleId: cycleId, hamUid: 'DC499D0C', lung: 'lung_a' })
     });
-    return await r.json();
-  } catch(e) { return null; }
+  } catch(e) { /* essence tap never stops the cycle */ }
+  await stampBead({ ham_uid: 'DC499D0C', agent_global: 'AIR',
+    acl_stamp: '\u2b21B:essence.cycle.' + cycleId + ':SEAL:tap:20260617\u2b21',
+    stamp_type: 'AIR_CYCLE', source: 'essence.cycle.' + cycleId + '.' + Date.now(),
+    content: JSON.stringify({ cycleId: cycleId, lung: 'lung_a' }),
+    summary: '[AIR] Essence lung_a tap -- cycle ' + cycleId, importance: 8 });
 }
 
-// ── STAMP RESULT for A'NU to read ──────────────────────────────────────────────
-async function stampForAnu(sessionId, filePath, verdict, summary) {
-  return await stampBead({
-    ham_uid: 'DC499D0C', agent_global: 'EANEW',
-    acl_stamp: '\u2b21B:eanew.result.' + sessionId + ':RESULT:' + verdict + ':20260617\u2b21',
-    stamp_type: 'RESULT',
-    source: 'eanew.result.' + sessionId + '.' + Date.now(),
-    content: JSON.stringify({ sessionId: sessionId, path: filePath, verdict: verdict, for_anu: true }),
-    summary: '[EANEW] ' + summary,
-    importance: verdict === 'CANON_PASS' ? 9 : 6
-  });
-}
-
-// ── DETERMINE NEXT SESSION from roadmap ────────────────────────────────────────
-function determineNextSession(recentResults) {
-  // Simple: look for the most recent PASS and suggest B sessions
-  // In production SPAN reads the full roadmap BEAD. For now use heuristics.
-  var completedSessions = recentResults.map(function(r) {
-    try { var c = JSON.parse(r.content || '{}'); return c.session || ''; } catch(e) { return ''; }
-  }).filter(Boolean);
-
-  var PHASE_B_SESSIONS = ['B1','B2','B3','B4','B5','B6','B7'];
-  for (var i = 0; i < PHASE_B_SESSIONS.length; i++) {
-    if (!completedSessions.includes(PHASE_B_SESSIONS[i])) return PHASE_B_SESSIONS[i];
-  }
-  return null; // All Phase B done
-}
-
-// ── ONE CYCLE ────────────────────────────────────────────────────────────────────
+// ── MAIN CYCLE ─────────────────────────────────────────────────────────────────
 async function runCycle() {
-  var cycleId = 'eanew_cycle_' + Date.now();
+  var cycleId = 'eanew_' + Date.now();
   console.log('[EANEW] Cycle start:', cycleId);
 
-  // 1. Read SPAN state and recent CANEW results
-  var spanState = await readSpanState();
-  var recentResults = await readCanewResults(20);
-
-  // 2. Determine next session
-  var nextSession = determineNextSession(recentResults);
+  // 1. Read SPAN map — know what's next
+  var spanMap = await readSpanMap();
+  if (!spanMap) {
+    console.log('[EANEW] No SPAN map found');
+    return { status: 'hold', reason: 'no_span_map' };
+  }
+  var nextSession = spanMap.next_session;
   if (!nextSession) {
-    console.log('[EANEW] All tracked sessions complete. Entering standby.');
-    await stampBead({
-      ham_uid: 'DC499D0C', agent_global: 'EANEW',
-      acl_stamp: '\u2b21B:eanew.cycle.' + cycleId + ':SEAL:standby:20260617\u2b21',
-      stamp_type: 'AIR_CYCLE',
-      source: 'eanew.cycle.' + cycleId + '.' + Date.now(),
-      content: JSON.stringify({ cycleId: cycleId, status: 'standby', reason: 'all_sessions_complete' }),
-      summary: '[EANEW] Cycle ' + cycleId + ' -- standby, all sessions complete', importance: 7
-    });
+    console.log('[EANEW] All sessions complete. Standby.');
     return { status: 'standby' };
   }
 
-  // 3. Use Gemini to compose the task for CANEW
-  var doctrine = DOCTRINE_BIBLE || 'Load doctrine from brandonjpiercesr-cmyk/canew/doctrine/CANEW_DOCTRINE_BIBLE.md';
-  var recentSummaries = recentResults.slice(0,5).map(function(r) { return r.summary; }).join('\n');
-
-  var taskPrompt = 'You are EANEW, the autonomous watcher. CANEW is your coding department.\n' +
-    'Based on the roadmap, the next session to build is: ' + nextSession + '\n' +
-    'Recent CANEW completions:\n' + recentSummaries + '\n\n' +
-    'Write a specific, detailed task instruction for CANEW to build the next file for session ' + nextSession + '.\n' +
-    'Include: exact file path, exact function names, exact logic steps, exact env var names.\n' +
-    'Keep it concrete. No meta-commentary. Just the task.';
-
-  var task = await eanewThink(doctrine.slice(0, 15000), taskPrompt);
+  // 2. Get the predefined task for this session
+  var task = SESSION_TASKS[nextSession];
   if (!task) {
-    console.log('[EANEW] Gemini returned null for session', nextSession);
-    return { status: 'hold', reason: 'gemini_null' };
+    console.log('[EANEW] No task defined for session', nextSession);
+    return { status: 'hold', reason: 'no_task_for_' + nextSession };
   }
-
   console.log('[EANEW] Dispatching session', nextSession, 'to CANEW...');
 
-  // 4. Fire CANEW
+  // 3. Fire CANEW with the predefined task
   var canewResult = await fireCanew(task, nextSession, null);
-  var failCount = 0;
 
-  // 5. If CANEW fails, retry once with specific gap
+  // 4. If CANEW fails first attempt, report fail and retry once
   if (!canewResult.ok) {
-    failCount++;
-    await fetch(process.env.CANEW_URL + '/canew/canon-fail', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: nextSession })
+    await fetch((process.env.CANEW_URL || 'https://canew.onrender.com') + '/canew/canon-fail', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: nextSession })
     }).catch(function() {});
-    var retryTask = task + '\n\nPREVIOUS ATTEMPT FAILED: ' + canewResult.reason + '. Fix and retry.';
-    canewResult = await fireCanew(retryTask, nextSession, canewResult.reason);
+    canewResult = await fireCanew(task, nextSession, 'First attempt failed: ' + canewResult.reason);
   }
 
-  // 6. Grade with CANON
-  var verdict = 'CANON_PASS';
-  if (canewResult.ok && canewResult.path) {
-    var canon = await canonCheck(canewResult.path, nextSession);
-    verdict = canon.verdict;
-    if (verdict !== 'CANON_PASS') {
-      console.log('[EANEW] CANON_GAP for', nextSession, ':', JSON.stringify(canon.gaps));
-    }
-  } else {
-    verdict = 'CANON_GAP';
-  }
+  // 5. EANEW's independent CANON grade
+  var canon = await canonGrade(canewResult.path);
+  var verdict = canon.verdict;
+  console.log('[EANEW] CANON verdict for', nextSession, ':', verdict, canon.gaps.length > 0 ? JSON.stringify(canon.gaps) : '');
 
-  // 7. Stamp SEAL on PASS
-  var summary = 'Session ' + nextSession + ' -- ' + verdict + (canewResult.path ? ' -- ' + canewResult.path : '');
-  await stampForAnu(nextSession, canewResult.path || '', verdict, summary);
+  // 6. Update SPAN map
+  spanMap = await updateSpanMap(spanMap, nextSession, verdict === 'CANON_PASS' ? 'PASS' : 'PARTIAL');
+
+  // 7. Stamp RESULT for A'NU
+  var summary = 'Session ' + nextSession + ' ' + verdict + (canewResult.path ? ' -- ' + canewResult.path : '');
+  await stampBead({ ham_uid: 'DC499D0C', agent_global: 'EANEW',
+    acl_stamp: '\u2b21B:eanew.result.' + nextSession + ':RESULT:' + verdict + ':20260617\u2b21',
+    stamp_type: 'RESULT', source: 'eanew.result.' + nextSession + '.' + Date.now(),
+    content: JSON.stringify({ sessionId: nextSession, path: canewResult.path, verdict: verdict, for_anu: true, canon_gaps: canon.gaps }),
+    summary: '[EANEW] ' + summary, importance: verdict === 'CANON_PASS' ? 9 : 6 });
 
   if (verdict === 'CANON_PASS') {
-    await stampBead({
-      ham_uid: 'DC499D0C', agent_global: 'EANEW',
+    await stampBead({ ham_uid: 'DC499D0C', agent_global: 'EANEW',
       acl_stamp: '\u2b21B:eanew.seal.' + nextSession + ':SEAL:complete:20260617\u2b21',
-      stamp_type: 'AIR_CYCLE',
-      source: 'eanew.seal.' + nextSession + '.' + Date.now(),
+      stamp_type: 'AIR_CYCLE', source: 'eanew.seal.' + nextSession + '.' + Date.now(),
       content: JSON.stringify({ session: nextSession, path: canewResult.path, cycleId: cycleId }),
-      summary: '[EANEW] SEAL -- session ' + nextSession + ' complete', importance: 9
-    });
+      summary: '[EANEW] SEAL -- ' + nextSession + ' complete', importance: 9 });
   }
 
-  // 8. Tap the other lung (aibebase)
+  // 8. Tap other lung
   await essenceTap(cycleId);
 
-  console.log('[EANEW] Cycle complete:', cycleId, '| session:', nextSession, '| verdict:', verdict);
-  return { cycleId: cycleId, session: nextSession, verdict: verdict, path: canewResult.path };
+  console.log('[EANEW] Cycle done:', nextSession, verdict);
+  return { cycleId: cycleId, session: nextSession, verdict: verdict, path: canewResult.path, nextSession: spanMap.next_session };
 }
 
-// ── ENDPOINTS ─────────────────────────────────────────────────────────────────
+// ── ENDPOINTS ──────────────────────────────────────────────────────────────────
 app.get('/health', function(req, res) {
-  res.json({
-    ok: true, service: 'EANEW', role: 'C3 autonomous watcher',
-    model: 'google/gemini-3.1-flash-lite via OpenRouter',
+  res.json({ ok: true, service: 'EANEW', model: 'google/gemini-3.1-flash-lite',
     doctrine_loaded: DOCTRINE_BIBLE ? DOCTRINE_BIBLE.length + ' chars' : 'NOT LOADED',
-    cycle_running: CYCLE_RUNNING
-  });
+    cycle_running: CYCLE_RUNNING, sessions_defined: Object.keys(SESSION_TASKS) });
 });
+app.get('/', function(req, res) { res.json({ ok: true, service: 'EANEW', phase: 'B4' }); });
 
-app.get('/', function(req, res) {
-  res.json({ ok: true, service: 'EANEW', role: 'C3 autonomous watcher lung', phase: 'B-built' });
-});
-
-// Manual cycle trigger (for testing — in production EANEW self-triggers)
 app.post('/eanew/cycle', async function(req, res) {
   if (CYCLE_RUNNING) return res.json({ ok: false, reason: 'cycle_already_running' });
   CYCLE_RUNNING = true;
-  try {
-    var result = await runCycle();
-    res.json({ ok: true, result: result });
-  } catch(e) {
-    console.error('[EANEW] Cycle error:', e.message);
-    res.json({ ok: false, error: e.message });
-  } finally {
-    CYCLE_RUNNING = false;
-  }
+  try { var result = await runCycle(); res.json({ ok: true, result: result }); }
+  catch(e) { console.error('[EANEW] Cycle error:', e.message); res.json({ ok: false, error: e.message }); }
+  finally { CYCLE_RUNNING = false; }
 });
 
-// Receive status reports from CANEW or external triggers
 app.post('/eanew/report', async function(req, res) {
   var body = req.body || {};
-  console.log('[EANEW] Report received:', JSON.stringify(body).slice(0, 200));
-  await stampBead({
-    ham_uid: body.hamUid || 'DC499D0C', agent_global: 'EANEW',
+  await stampBead({ ham_uid: body.hamUid || 'DC499D0C', agent_global: 'EANEW',
     acl_stamp: '\u2b21B:eanew.report.' + Date.now() + ':RESULT:received:20260617\u2b21',
-    stamp_type: 'RESULT',
-    source: 'eanew.report.' + Date.now(),
-    content: JSON.stringify(body),
-    summary: '[EANEW] Report: ' + (body.summary || JSON.stringify(body).slice(0,60)),
-    importance: 6
-  });
+    stamp_type: 'RESULT', source: 'eanew.report.' + Date.now(),
+    content: JSON.stringify(body), summary: '[EANEW] ' + (body.summary || 'report received'), importance: 6 });
   res.json({ ok: true });
 });
 
-// Startup: load doctrine, then begin autonomous cycle loop
-loadDoctrineBible().then(function(bible) {
-  DOCTRINE_BIBLE = bible;
-  console.log('[EANEW] Ready. Doctrine:', bible ? bible.length + ' chars' : 'MISSING');
-  // Autonomous cycle: run once on startup, then every 5 minutes
-  // In Phase B this is manual-trigger only; auto-loop activates in Phase B5
-  console.log('[EANEW] Autonomous cycle will be triggered via /eanew/cycle endpoint. Phase B5 activates auto-loop.');
-}).catch(function(e) {
-  console.error('[EANEW] Startup error:', e.message);
-});
+loadDoctrineBible().then(function(b) {
+  DOCTRINE_BIBLE = b;
+  console.log('[EANEW] Ready. Doctrine:', b ? b.length + ' chars' : 'MISSING');
+}).catch(function(e) { console.error('[EANEW] Startup error:', e.message); });
 
 var port = process.env.PORT || 10001;
 app.listen(port, function() { console.log('[EANEW] Listening on', port); });
