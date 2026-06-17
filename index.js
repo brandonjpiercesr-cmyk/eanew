@@ -42,7 +42,7 @@ async function readSpanMap() {
   if (!BU || !BK) return null;
   var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
   var _huid = process.env.EANEW_HAM_UID || process.env.HAM_UID || 'DC499D0C';
-  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.' + _huid&order=created_at.desc&limit=1', { headers: hdrs });
+  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.' + _huid + '&order=created_at.desc&limit=1', { headers: hdrs });
   var rows = await r.json();
   if (!rows || !rows[0]) return null;
   try { return JSON.parse(rows[0].content); } catch(e) { return null; }
