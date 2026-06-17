@@ -282,7 +282,7 @@ async function lifeCheck(hamUid) {
   var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
 
   // Read last 20 stamps -- what did the team do?
-  var recentRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=in.(LOGFUL,RESULT,AIR_CYCLE)&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=20', { headers: hdrs })
+  var recentRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=in.(LOGFUL,RESULT,AIR_CYCLE)&agent_global=neq.EANEW&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=20', { headers: hdrs })
     .then(function(r) { return r.json(); }).catch(function() { return []; });
 
   // Classify findings
