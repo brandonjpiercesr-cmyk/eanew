@@ -160,8 +160,8 @@ async function runCycle() {
   }
   var nextSession = spanMap.next_session;
   if (!nextSession) {
-    console.log('[EANEW] All sessions complete. Standby.');
-    return { status: 'standby' };
+    console.log('[EANEW] SPAN empty -- running life check...');
+    return await lifeCheck(_hamUid || 'DC499D0C');
   }
 
   // 2. Get task -- first check SESSION_TASKS, then read from brain
