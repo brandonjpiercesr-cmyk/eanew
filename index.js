@@ -311,7 +311,9 @@ async function checkSystemHealth() {
   var results = {};
   for (var i = 0; i < checks.length; i++) {
     try {
-      var r = await fetch(checks[i].url, { signal: AbortSignal.timeout(4000) });
+      var ctrl = new AbortController();
+      var timer = setTimeout(function(){ctrl.abort();}, 4000);
+      var r = await fetch(checks[i].url, { signal: ctrl.signal }).finally(function(){clearTimeout(timer);});
       results[checks[i].name] = r.ok ? 'up' : 'degraded';
     } catch(e) { results[checks[i].name] = 'unreachable'; }
   }
