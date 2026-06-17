@@ -345,10 +345,10 @@ async function lifeCheck(hamUid) {
   var recentRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=in.(LOGFUL,RESULT,AIR_CYCLE)&agent_global=neq.EANEW&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=20', { headers: hdrs })
     .then(function(r) { return r.json(); }).catch(function() { return []; });
 
-  // Classify findings -- include unreachable services
-  downServices.forEach(function(s){ findings.errors.push('[HEALTH] ' + s + ' is ' + health[s]); });
   // Classify LOGFUL findings
   var findings = { holds: [], errors: [], needs_brandon: [], normal: [] };
+  // Wire health check results into findings
+  downServices.forEach(function(s){ findings.errors.push('[HEALTH] ' + s + ' is ' + health[s]); });
   recentRows.forEach(function(row) {
     var s = (row.summary || '').toLowerCase();
     if (s.includes('hold') || s.includes('canon_hold') || s.includes('canon_gap')) findings.holds.push(row.summary);
