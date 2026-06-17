@@ -250,10 +250,25 @@ app.post('/eanew/report', async function(req, res) {
   res.json({ ok: true });
 });
 
+// ── AUTO-LOOP: recursive, never setInterval ──────────────────────────────────
+async function autoLoop() {
+  try {
+    if (!CYCLE_RUNNING) { await runCycle(); }
+  } catch(e) {
+    console.error('[EANEW] Auto-loop error:', e.message);
+  }
+  var delay = parseInt(process.env.CYCLE_DELAY_MS || '300000');
+  setTimeout(autoLoop, delay);
+}
+
 loadDoctrineBible().then(function(b) {
   DOCTRINE_BIBLE = b;
-  console.log('[EANEW] Ready. Doctrine:', b ? b.length + ' chars' : 'MISSING');
-}).catch(function(e) { console.error('[EANEW] Startup error:', e.message); });
+  console.log('[EANEW] Doctrine loaded:', b ? b.length + ' chars' : 'MISSING');
+  autoLoop();
+  console.log('[EANEW] Auto-loop started. Fires every', (parseInt(process.env.CYCLE_DELAY_MS||'300000')/60000).toFixed(1), 'minutes.');
+}).catch(function(e) {
+  console.error('[EANEW] Startup error:', e.message);
+});
 
 var port = process.env.PORT || 10001;
 app.listen(port, function() { console.log('[EANEW] Listening on', port); });
