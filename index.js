@@ -41,7 +41,8 @@ async function readSpanMap() {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
   if (!BU || !BK) return null;
   var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
-  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1', { headers: hdrs });
+  var _huid = process.env.EANEW_HAM_UID || process.env.HAM_UID || 'DC499D0C';
+  var r = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.completion_map*&ham_uid=eq.' + _huid&order=created_at.desc&limit=1', { headers: hdrs });
   var rows = await r.json();
   if (!rows || !rows[0]) return null;
   try { return JSON.parse(rows[0].content); } catch(e) { return null; }
@@ -74,7 +75,7 @@ async function updateSpanMap(spanMap, session, verdict) {
   await fetch(BU + '/rest/v1/aibe_brain', {
     method: 'POST',
     headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-    body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'SPAN',
+    body: JSON.stringify({ ham_uid: (process.env.EANEW_HAM_UID || process.env.HAM_UID || 'DC499D0C'), agent_global: 'SPAN',
       acl_stamp: '\u2b21B:span.completion_map:DIRECTIVE:session_tracking:20260617\u2b21',
       stamp_type: 'DIRECTIVE', source: 'span.completion_map.' + Date.now(),
       content: JSON.stringify(spanMap),
@@ -135,7 +136,7 @@ async function essenceTap(cycleId) {
   try {
     await fetch(AIBEBASE + '/air/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'eanew_tap', cycleId: cycleId, hamUid: 'DC499D0C', lung: 'lung_a' })
+      body: JSON.stringify({ source: 'eanew_tap', cycleId: cycleId, hamUid: (process.env.EANEW_HAM_UID || process.env.HAM_UID || 'DC499D0C'), lung: 'lung_a' })
     });
   } catch(e) { /* essence tap never stops the cycle */ }
   await stampBead({ ham_uid: 'DC499D0C', agent_global: 'AIR',
@@ -275,17 +276,76 @@ function getAgentContext() {
   return Object.keys(AGENT_MAP).map(function(k) { return k + ': ' + AGENT_MAP[k].role; }).join('. ');
 }
 
+
+// ── LLM DELIBERATION (Gemini Flash Lite via OpenRouter) ──────────────────────
+async function deliberate(question, context) {
+  var OR = process.env.OPENROUTER_API_KEY;
+  if (!OR) return { answer: 'no_openrouter_key', confident: false };
+  try {
+    var r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + OR, 'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.AIBEBASE_URL || 'https://aibebase.onrender.com' },
+      body: JSON.stringify({ model: 'google/gemini-3.1-flash-lite', max_tokens: 150,
+        messages: [
+          { role: 'system', content: 'You are EANEW, the autonomous Life Assistant Code. You watch the A\u2019NEW ecosystem and report honestly. One sentence. Direct. No fluff.' },
+          { role: 'user', content: 'CONTEXT: ' + context + '\n\nQUESTION: ' + question }
+        ]})
+    });
+    var d = await r.json();
+    var answer = d.choices && d.choices[0] ? d.choices[0].message.content.trim() : 'no_answer';
+    return { answer: answer, confident: true };
+  } catch(e) { return { answer: 'deliberation_error', confident: false }; }
+}
+
+// ── SYSTEM HEALTH CHECK ───────────────────────────────────────────────────────
+async function checkSystemHealth() {
+  var base = process.env.AIBEBASE_URL || 'https://aibebase.onrender.com';
+  var canew = process.env.CANEW_URL || 'https://canew.onrender.com';
+  var checks = [
+    { name: 'canew', url: canew + '/health' },
+    { name: 'aibebase', url: base + '/health' },
+    { name: 'advisors_bdif', url: base + '/advisors/bdif/health' },
+    { name: 'advisors_gmg', url: base + '/advisors/gmg/health' }
+  ];
+  var results = {};
+  for (var i = 0; i < checks.length; i++) {
+    try {
+      var r = await fetch(checks[i].url, { signal: AbortSignal.timeout(4000) });
+      results[checks[i].name] = r.ok ? 'up' : 'degraded';
+    } catch(e) { results[checks[i].name] = 'unreachable'; }
+  }
+  return results;
+}
+
+// ── TEAM ACTIVITY READER ──────────────────────────────────────────────────────
+async function readTeamActivity(hamUid) {
+  var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
+  if (!BU || !BK) return [];
+  var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
+  var twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  return await fetch(
+    BU + '/rest/v1/aibe_brain?agent_global=in.(IMAN,WREN,CANEW,ANU,ANEW)&ham_uid=eq.' + hamUid + '&created_at=gte.' + twoHoursAgo + '&order=created_at.desc&limit=30',
+    { headers: hdrs }
+  ).then(function(r){return r.json()}).catch(function(){return []});
+}
 // ── JUDGMENT LAYER ────────────────────────────────────────────────────────
 async function lifeCheck(hamUid) {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
   if (!BU || !BK) return { ok: false, reason: 'no_brain' };
   var hdrs = { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' };
 
+  // System health check first
+  var health = await checkSystemHealth();
+  var downServices = Object.keys(health).filter(function(k){return health[k] !== 'up';});
+
   // Read last 20 stamps -- what did the team do?
   var recentRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=in.(LOGFUL,RESULT,AIR_CYCLE)&agent_global=neq.EANEW&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=20', { headers: hdrs })
     .then(function(r) { return r.json(); }).catch(function() { return []; });
 
-  // Classify findings
+  // Classify findings -- include unreachable services
+  downServices.forEach(function(s){ findings.errors.push('[HEALTH] ' + s + ' is ' + health[s]); });
+  // Classify LOGFUL findings
   var findings = { holds: [], errors: [], needs_brandon: [], normal: [] };
   recentRows.forEach(function(row) {
     var s = (row.summary || '').toLowerCase();
@@ -295,15 +355,16 @@ async function lifeCheck(hamUid) {
     else findings.normal.push(row.summary);
   });
 
-  // Dispatch: compose task from observation if holds exist
+  // Dispatch: deliberate then compose task from observation if holds exist
   if (findings.holds.length > 0) {
     var holdSummary = findings.holds.slice(0, 3).join('; ');
+    var interpretation = await deliberate('What does this hold indicate and what should EANEW do?', holdSummary);
     await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST',
       headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'DIRECTIVE',
         acl_stamp: '\u2b21B:eanew.dispatch.hold:DIRECTIVE:composed:20260617\u2b21',
         source: 'eanew.dispatch.hold.' + Date.now(),
-        content: JSON.stringify({ composed_by: 'EANEW_lifeCheck', holds_found: findings.holds, action: 'review_and_retry', agent_context: getAgentContext() }),
+        content: JSON.stringify({ composed_by: 'EANEW_lifeCheck', holds_found: findings.holds, action: 'review_and_retry', interpretation: (interpretation && interpretation.answer) || 'none', agent_context: getAgentContext() }),
         summary: '[EANEW] Dispatch: ' + findings.holds.length + ' hold(s) -- ' + holdSummary.slice(0, 60),
         importance: 8 }) }).catch(function() {});
   }
@@ -320,7 +381,9 @@ async function lifeCheck(hamUid) {
         importance: 9 }) }).catch(function() {});
   }
 
-  return { ok: true, status: 'life_check', findings: { holds: findings.holds.length, errors: findings.errors.length, needs_brandon: findings.needs_brandon.length, normal: findings.normal.length }, dispatched: findings.holds.length > 0, surfaced: (findings.needs_brandon.length + findings.errors.length) > 0 };
+  var lifeResult = { ok: true, status: 'life_check', findings: { holds: findings.holds.length, errors: findings.errors.length, needs_brandon: findings.needs_brandon.length, normal: findings.normal.length }, dispatched: findings.holds.length > 0, surfaced: (findings.needs_brandon.length + findings.errors.length) > 0 };
+  await stampMeetingMinutes(hamUid, lifeResult, Date.now() - 5000);
+  return lifeResult;
 }
 
 // ── MEETING MINUTES ───────────────────────────────────────────────────────
