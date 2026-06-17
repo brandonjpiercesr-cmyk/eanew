@@ -162,11 +162,24 @@ async function runCycle() {
     return { status: 'standby' };
   }
 
-  // 2. Get the predefined task for this session
+  // 2. Get task -- first check SESSION_TASKS, then read from brain
   var task = SESSION_TASKS[nextSession];
   if (!task) {
-    console.log('[EANEW] No task defined for session', nextSession);
-    return { status: 'hold', reason: 'no_task_for_' + nextSession };
+    // Read task BEAD from brain (SPAN stamps task BEADs for sessions beyond B7)
+    var BU_t = process.env.AIBE_BRAIN_URL, BK_t = process.env.AIBE_BRAIN_KEY;
+    if (BU_t && BK_t) {
+      var taskRows = await fetch(BU_t + '/rest/v1/aibe_brain?agent_global=eq.SPAN&stamp_type=eq.DIRECTIVE&source=like.span.task.' + nextSession + '*&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1',
+        { headers: { apikey: BK_t, Authorization: 'Bearer ' + BK_t, 'Accept-Profile': 'abacia_core' } })
+        .then(function(r) { return r.json(); }).catch(function() { return []; });
+      if (taskRows[0]) {
+        try { var tc = JSON.parse(taskRows[0].content); task = tc.task; } catch(e) {}
+      }
+    }
+    if (!task) {
+      console.log('[EANEW] No task found for session', nextSession, '-- in SESSION_TASKS or brain');
+      return { status: 'hold', reason: 'no_task_for_' + nextSession };
+    }
+    console.log('[EANEW] Task loaded from brain for session', nextSession);
   }
   console.log('[EANEW] Dispatching session', nextSession, 'to CANEW...');
 
