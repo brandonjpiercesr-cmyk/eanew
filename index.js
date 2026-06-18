@@ -476,6 +476,18 @@ async function lifeCheck(hamUid, cycleId) {
       summary: '[EANEW] Surface to A\'NU: ' + (findings.errors.length + findings.needs_brandon.length) + ' item(s)',
       importance: 9
     });
+    // ── PIPE FIX: Command TAP reach when surfacing high-priority items ──────────
+    if (findings.needs_brandon && findings.needs_brandon.length > 0) {
+      try {
+        var atmR = await fetch(BU + '/rest/v1/aibe_brain?agent_global=eq.ATMOSPHERE&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=1', { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } });
+        var atmD = await atmR.json();
+        var bPhone = atmD && atmD[0] && JSON.parse(atmD[0].content || '{}').phone;
+        if (bPhone) {
+          var tapMsg = findings.needs_brandon[0] ? findings.needs_brandon[0].slice(0, 140) : "Hey — I found something for you.";
+          await fetch('https://aibebase.onrender.com/tap/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: bPhone, message: tapMsg, hamUid: hamUid }) });
+        }
+      } catch(e) { /* tap failure never breaks cycle */ }
+    }
   }
 
   // Step 9: Tap the other lung
