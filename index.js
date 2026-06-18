@@ -253,13 +253,13 @@ async function readSpanMap() {
 
 async function updateSpanMap(spanMap, session, verdict) {
   var hamUid = resolveHam();
-  ['PhaseA','PhaseB','PhaseC','PhaseD','PhaseE','PhaseF','PhaseG','PhaseH','PhaseI','PhaseJ','PhaseK'].forEach(function(phase) {
+  Object.keys(spanMap).filter(function(k){return k.match(/^Phase[A-Z]+$/);}).forEach(function(phase) {
     if (spanMap[phase] && spanMap[phase][session] !== undefined) {
       spanMap[phase][session] = verdict;
     }
   });
   var nextSession = null;
-  var phases = ['PhaseA','PhaseB','PhaseC','PhaseD','PhaseE','PhaseF','PhaseG','PhaseH','PhaseI','PhaseJ','PhaseK'];
+  var phases = Object.keys(spanMap).filter(function(k){return k.match(/^Phase[A-Z]+$/);}).sort();
   for (var i = 0; i < phases.length; i++) {
     var p = spanMap[phases[i]];
     if (p) {
