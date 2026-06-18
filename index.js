@@ -541,10 +541,34 @@ async function runCycle() {
     canewResult = await fireCanew(task, nextSession, 'retry: first attempt failed -- ' + canewResult.reason);
   }
 
-  // Step 4: Grade with CANON
+  // Step 4: Grade with CANON -- if GAP, deliberate and retry up to 3 times
   var canon = await canonGrade(canewResult.path);
   var verdict = canon.verdict;
-  console.log('[EANEW] CANON:', nextSession, verdict);
+  console.log('[EANEW] CANON:', nextSession, verdict, canon.gaps ? JSON.stringify(canon.gaps) : '');
+
+  // EANEW catches the gap and fixes the task herself -- up to 3 attempts
+  var retryTask = task;
+  var retryAttempt = 0;
+  while (verdict !== 'CANON_PASS' && retryAttempt < 3) {
+    retryAttempt++;
+    console.log('[EANEW] CANON_GAP attempt', retryAttempt, '-- deliberating on fix...');
+
+    // Deliberate on what went wrong and how to fix the task
+    var gapContext = 'CANON found these gaps: ' + JSON.stringify(canon.gaps || []) + '. The task was: ' + retryTask.slice(0, 500);
+    var fixAdvice = await deliberate('CANEW built this but CANON flagged gaps. What specific change to the task description would fix these gaps? Be precise and short.', gapContext, 'normal');
+
+    // Rewrite the task with the fix advice prepended
+    retryTask = 'IMPORTANT FIX FOR RETRY ' + retryAttempt + ': ' + fixAdvice.answer + '\n\nORIGINAL TASK:\n' + retryTask;
+
+    // Retry CANEW with the improved task
+    canewResult = await fireCanew(retryTask, nextSession + '_retry' + retryAttempt, 'gap_fix: ' + (canon.gaps || []).map(function(g){return g.reason}).join(', '));
+    if (!canewResult.ok) break;
+
+    // Regrade
+    canon = await canonGrade(canewResult.path);
+    verdict = canon.verdict;
+    console.log('[EANEW] CANON retry', retryAttempt, ':', verdict);
+  }
 
   // Step 5: Update SPAN
   spanMap = await updateSpanMap(spanMap, nextSession, verdict === 'CANON_PASS' ? 'PASS' : 'PARTIAL');
