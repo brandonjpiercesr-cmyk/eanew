@@ -283,10 +283,10 @@ async function updateSpanMap(spanMap, session, verdict) {
 }
 
 // ── FIRE CANEW ────────────────────────────────────────────────────────────────
-async function fireCanew(task, sessionId, retryReason) {
+async function fireCanew(task, sessionId, retryReason, repo) {
   var CANEW = process.env.CANEW_URL || 'https://canew.onrender.com';
   var hamUid = resolveHam();
-  var payload = { task: task, hamUid: hamUid, sessionId: sessionId };
+  var payload = { task: task, hamUid: hamUid, sessionId: sessionId, repo: repo || 'anew' };
   if (retryReason) payload.retryReason = retryReason;
   var r = await fetch(CANEW + '/canew/build', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
