@@ -729,6 +729,44 @@ app.post('/eanew/report', async function(req, res) {
   res.json({ ok: true });
 });
 
+// ── CONSULT: present a finding/vision to EANEW, get her business-analyst read ──
+// No cycle, no CANEW dispatch, no outbound. Exposes her deliberation as a channel.
+app.post('/eanew/ask', async function(req, res) {
+  var body = req.body || {};
+  var question = body.question || '';
+  if (!question) return res.json({ ok: false, reason: 'no_question' });
+  var context = body.context || '';
+  var hamUid = body.hamUid || resolveHam();
+  var OR = process.env.OPENROUTER_API_KEY;
+  if (!OR) return res.json({ ok: false, reason: 'no_openrouter_key' });
+  var model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite';
+  var docPrefix = DOCTRINE_BIBLE ? 'DOCTRINE CONTEXT (authoritative -- always follow):\n\n' + DOCTRINE_BIBLE.slice(0, 12000) + '\n\n---\n\n' : '';
+  var systemPrompt = docPrefix + 'AGENT MAP:\n' + getAgentContext() + '\n\n' +
+    'You are EANEW, the autonomous Life Assistant Code for the A\u2019NEW ecosystem, acting as Brandon\u2019s business technical analyst. ' +
+    'A finding or vision is presented to you. Give your read: name the IT solution, say where it sequences against SPAN and whether it should go now, ' +
+    'state what CANEW would actually build, and call any risk. You never build -- you analyze and direct. Be specific and direct, 4-6 sentences.';
+  try {
+    var r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + OR, 'Content-Type': 'application/json', 'HTTP-Referer': process.env.AIBEBASE_URL || 'https://aibebase.onrender.com' },
+      body: JSON.stringify({ model: model, max_tokens: 500, messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: 'PRESENTED:\n' + question + (context ? '\n\nCONTEXT:\n' + context : '') }
+      ]})
+    });
+    var d = await r.json();
+    var answer = d.choices && d.choices[0] ? d.choices[0].message.content.trim() : ('no_answer: ' + JSON.stringify(d).slice(0, 200));
+    await brainWrite({
+      ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'RESULT',
+      acl_stamp: '\u2b21B:eanew.consult.' + Date.now() + ':RESULT:ba_read:20260619\u2b21',
+      source: 'eanew.consult.' + Date.now(),
+      content: JSON.stringify({ question: question, answer: answer, model: model }),
+      summary: '[EANEW] BA read: ' + question.slice(0, 80), importance: 7
+    });
+    res.json({ ok: true, answer: answer, model: model });
+  } catch (e) { res.json({ ok: false, error: e.message.slice(0, 140) }); }
+});
+
 // ── AUTO-LOOP: recursive, never setInterval ───────────────────────────────────
 async function autoLoop() {
   try {
