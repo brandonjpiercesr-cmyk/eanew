@@ -509,6 +509,45 @@ async function lifeCheck(hamUid, cycleId) {
 }
 
 // ── MAIN RUN CYCLE ────────────────────────────────────────────────────────────
+
+// ── CLAIR PIPE FIX: deploy-poll-verify (runtime, not a file) ─────────────────
+// EANEW makes the real Render deploy call after CANON_PASS, polls to live, verifies.
+// This is the act-read-loop the relay uses. Done = live, not committed.
+async function deployAndVerify(targetSvc) {
+  var RK = process.env.RENDER_API_KEY;
+  if (!RK) return { deployed: false, reason: 'no render key' };
+  var svc = targetSvc || 'srv-d8lpvjcvikkc73bolec0'; // aibebase by default
+  try {
+    var trig = await fetch('https://api.render.com/v1/services/' + svc + '/deploys', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + RK, 'Content-Type': 'application/json' }, body: '{}'
+    });
+    var td = await trig.json();
+    var deployId = td.id;
+    if (!deployId) return { deployed: false, reason: 'no deploy id' };
+    // Poll up to 18 times (3 min)
+    for (var i = 0; i < 18; i++) {
+      await new Promise(function(r){ setTimeout(r, 10000); });
+      var pr = await fetch('https://api.render.com/v1/services/' + svc + '/deploys/' + deployId, {
+        headers: { 'Authorization': 'Bearer ' + RK }
+      });
+      var pd = await pr.json();
+      var status = pd.status;
+      if (status === 'live') {
+        // Verify health
+        try {
+          var hr = await fetch('https://aibebase.onrender.com/health');
+          var hd = await hr.json();
+          return { deployed: true, status: 'live', health: hd.status, deployId: deployId };
+        } catch(e) { return { deployed: true, status: 'live', health: 'unverified', deployId: deployId }; }
+      }
+      if (status === 'update_failed' || status === 'canceled' || status === 'build_failed') {
+        return { deployed: false, status: status, deployId: deployId };
+      }
+    }
+    return { deployed: false, status: 'timeout', deployId: deployId };
+  } catch(e) { return { deployed: false, reason: e.message }; }
+}
+
 async function runCycle() {
   var hamUid = resolveHam();
   var cycleId = 'eanew_' + Date.now();
@@ -596,13 +635,32 @@ async function runCycle() {
   });
 
   if (verdict === 'CANON_PASS') {
+    // Step 6b: DEPLOY. A committed file is not done. EANEW triggers the real deploy,
+    // polls to live, verifies health. If it fails, the build is NOT sealed.
+    var deployResult = { deployed: false, status: 'not_attempted' };
+    var pathStr = canewResult.path || '';
+    var needsDeploy = pathStr && (pathStr.indexOf('.js') > -1) && pathStr.indexOf('coding-department/') === -1;
+    if (needsDeploy) {
+      deployResult = await deployAndVerify('srv-d8lpvjcvikkc73bolec0');
+    }
     await brainWrite({
       ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'AIR_CYCLE',
       acl_stamp: '\u2b21B:eanew.seal.' + nextSession + ':SEAL:complete:20260617\u2b21',
       source: 'eanew.seal.' + nextSession + '.' + Date.now(),
-      content: JSON.stringify({ session: nextSession, path: canewResult.path, cycleId: cycleId }),
-      summary: '[EANEW] SEAL -- ' + nextSession + ' complete', importance: 9
+      content: JSON.stringify({ session: nextSession, path: canewResult.path, cycleId: cycleId, deploy: deployResult }),
+      summary: '[EANEW] SEAL -- ' + nextSession + (needsDeploy ? (deployResult.deployed ? ' deployed LIVE' : ' DEPLOY FAILED: ' + (deployResult.status||deployResult.reason)) : ' (no deploy needed)'),
+      importance: 9
     });
+    // If deploy failed, surface it -- this build is not actually done
+    if (needsDeploy && !deployResult.deployed) {
+      await brainWrite({
+        ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'RESULT',
+        acl_stamp: '\u2b21B:eanew.deploy.failed:RESULT:needs_attention:20260619\u2b21',
+        source: 'eanew.deploy.failed.' + Date.now(),
+        content: JSON.stringify({ for_anu: true, needs_brandon: ['Build ' + nextSession + ' passed CANON but the deploy failed: ' + (deployResult.status || deployResult.reason) + '. The code is committed but not live.'], session: nextSession }),
+        summary: '[EANEW] Deploy failed for ' + nextSession + ' -- committed but not live', importance: 9
+      });
+    }
   }
 
   // Step 7: Tap other lung
