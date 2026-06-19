@@ -79,6 +79,19 @@ async function brainRead(query) {
 async function brainWrite(bead) {
   var BU = process.env.AIBE_BRAIN_URL, BK = process.env.AIBE_BRAIN_KEY;
   if (!BU || !BK) return null;
+  // Guarantee no orphan: every cycle bead carries a typed edge inside its content.
+  // content is stored as a JSON string; parse, ensure edges[], re-stringify.
+  try {
+    var co = bead.content;
+    if (typeof co === 'string') { try { co = JSON.parse(co); } catch (e) { co = { data: co }; } }
+    if (co === null || typeof co !== 'object') co = { data: co };
+    if (!Array.isArray(co.edges) || co.edges.length === 0) {
+      var ham = bead.ham_uid || 'unknown_ham';
+      var ag = bead.agent_global || 'EANEW';
+      co.edges = [{ type: 'contains', target: ag + '.' + ham + '.cycle_log' }];
+    }
+    bead.content = JSON.stringify(co);
+  } catch (e) { /* never block the heartbeat on edge-stamping */ }
   var r = await fetch(BU + '/rest/v1/aibe_brain', {
     method: 'POST',
     headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=representation' },
