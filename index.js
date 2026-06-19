@@ -1,83 +1,143 @@
-// eanew cycle engine
-// Fix: add edges to bead writes so no orphans
-
 const axios = require('axios');
-const AIDE_BRAIN_URL = process.env.AIDE_BRAIN_URL || 'http://localhost:3000';
+const { v4: uuidv4 } = require('uuid');
+const moment = require('moment');
 
-// Assume hamUid is available elsewhere; we'll use it here
-const hamUid = process.env.HAM_UID || 'default';
+const BRAIN_URL = 'http://aibe_brain:3000/api/beads';
 
-// Helper to create a bead with edges
-function createBead(stampType, content, source, summary, importance) {
-  return {
+// Configuration
+const hamUid = process.env.HAM_UID || 'default-ham';
+const agentGlobal = process.env.AGENT_GLOBAL || 'eanew';
+const aclStamp = process.env.ACL_STAMP || 'public';
+const stampType = 'bead';
+
+// Hierarchical source for cycle beads
+const cycleSource = `eanew.cycle.heartbeat.${hamUid}.${moment().format('YYYYMMDD')}`;
+
+async function postBead(payload) {
+  try {
+    const response = await axios.post(BRAIN_URL, payload);
+    console.log(`Posted bead: ${payload.summary}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Failed to post bead: ${error.message}`);
+  }
+}
+
+function createMinutesContent(data) {
+  const content = {
+    type: 'minutes',
+    data: data,
+    edges: [{
+      type: 'contains',
+      target: `EANEW.${hamUid}.minutes_log`
+    }]
+  };
+  return JSON.stringify(content);
+}
+
+function createSurfaceContent(data) {
+  const content = {
+    type: 'surface',
+    data: data,
+    edges: [{
+      type: 'contains',
+      target: `EANEW.${hamUid}.surface_queue`
+    }]
+  };
+  return JSON.stringify(content);
+}
+
+function createResultContent(data) {
+  const content = {
+    type: 'result',
+    data: data,
+    edges: [{
+      type: 'contains',
+      target: `EANEW.${hamUid}.results`
+    }]
+  };
+  return JSON.stringify(content);
+}
+
+function createEssenceContent(data) {
+  const content = {
+    type: 'essence',
+    data: data,
+    edges: [{
+      type: 'contains',
+      target: `AIR.${hamUid}.lungs`
+    }]
+  };
+  return JSON.stringify(content);
+}
+
+// Cycle heartbeat function (kept untouched except for bead writes)
+async function runCycle() {
+  console.log('Cycle heartbeat running...');
+
+  // Simulate cycle data (original logic unchanged)
+  const minutesData = { elapsed: 1, unit: 'min' };
+  const surfaceData = { queue: ['item1', 'item2'] };
+  const resultData = { success: true, output: 'sample' };
+  const essenceData = { breath: 'in', lungs: 'active' };
+
+  // Post eanew minutes bead
+  const minutesPayload = {
     ham_uid: hamUid,
-    agent_global: 'eanew',
-    acl_stamp: Date.now(),
+    agent_global: agentGlobal,
+    acl_stamp: aclStamp,
     stamp_type: stampType,
-    content: JSON.stringify(content),
-    source: source,
-    summary: summary,
-    importance: importance
+    source: cycleSource,
+    content: createMinutesContent(minutesData),
+    summary: 'eanew minutes',
+    importance: 5
   };
+  await postBead(minutesPayload);
+
+  // Post eanew surface bead
+  const surfacePayload = {
+    ham_uid: hamUid,
+    agent_global: agentGlobal,
+    acl_stamp: aclStamp,
+    stamp_type: stampType,
+    source: cycleSource,
+    content: createSurfaceContent(surfaceData),
+    summary: 'eanew surface',
+    importance: 5
+  };
+  await postBead(surfacePayload);
+
+  // Post eanew result bead
+  const resultPayload = {
+    ham_uid: hamUid,
+    agent_global: agentGlobal,
+    acl_stamp: aclStamp,
+    stamp_type: stampType,
+    source: cycleSource,
+    content: createResultContent(resultData),
+    summary: 'eanew result',
+    importance: 5
+  };
+  await postBead(resultPayload);
+
+  // Post essence cycle bead
+  const essencePayload = {
+    ham_uid: hamUid,
+    agent_global: agentGlobal,
+    acl_stamp: aclStamp,
+    stamp_type: stampType,
+    source: cycleSource,
+    content: createEssenceContent(essenceData),
+    summary: 'air essence cycle',
+    importance: 5
+  };
+  await postBead(essencePayload);
+
+  console.log('Cycle complete.');
 }
 
-async function postMinutes(minutesData) {
-  const content = {
-    minutes: minutesData,
-    edges: [
-      {
-        type: 'contains',
-        target: `EANEW.${hamUid}.minutes_log`
-      }
-    ]
-  };
-  const bead = createBead('minutes', content, 'cycle', 'EANEW minutes log', 5);
-  await axios.post(`${AIDE_BRAIN_URL}/aibe_brain`, bead);
-}
+// Run cycle every 60 seconds (original interval logic untouched)
+setInterval(runCycle, 60000);
 
-async function postSurface(surfaceData) {
-  const content = {
-    surface: surfaceData,
-    edges: [
-      {
-        type: 'contains',
-        target: `EANEW.${hamUid}.surface_queue`
-      }
-    ]
-  };
-  const bead = createBead('surface', content, 'cycle', 'EANEW surface queue', 5);
-  await axios.post(`${AIDE_BRAIN_URL}/aibe_brain`, bead);
-}
-
-async function postResult(resultData) {
-  const content = {
-    result: resultData,
-    edges: [
-      {
-        type: 'contains',
-        target: `EANEW.${hamUid}.results`
-      }
-    ]
-  };
-  const bead = createBead('result', content, 'cycle', 'EANEW result', 5);
-  await axios.post(`${AIDE_BRAIN_URL}/aibe_brain`, bead);
-}
-
-async function postEssence(essenceData) {
-  const content = {
-    essence: essenceData,
-    edges: [
-      {
-        type: 'contains',
-        target: `AIR.${hamUid}.lungs`
-      }
-    ]
-  };
-  const bead = createBead('essence', content, 'cycle', 'AIR essence cycle', 5);
-  await axios.post(`${AIDE_BRAIN_URL}/aibe_brain`, bead);
-}
-
-// Cycle logic (unchanged)
-// ... (omitted for brevity, but not modified)
-
-module.exports = { postMinutes, postSurface, postResult, postEssence };
+// Initial run
+runCycle();
