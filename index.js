@@ -576,7 +576,8 @@ async function runCycle() {
       '&ham_uid=eq.' + hamUid + '&order=created_at.desc&limit=1'
     );
     if (taskRows[0]) {
-      try { var tc = JSON.parse(taskRows[0].content); task = tc.task; } catch(e) {}
+      var taskRepo = 'anew';
+    try { var tc = JSON.parse(taskRows[0].content); task = tc.task; if (tc.repo) taskRepo = tc.repo; } catch(e) {}
     }
     if (!task) {
       console.log('[EANEW] No task for session', nextSession);
@@ -587,7 +588,7 @@ async function runCycle() {
   console.log('[EANEW] Dispatching', nextSession, 'to CANEW...');
 
   // Step 3: Fire CANEW
-  var canewResult = await fireCanew(task, nextSession, null);
+  var canewResult = await fireCanew(task, nextSession, null, taskRepo);
   if (!canewResult.ok) {
     canewResult = await fireCanew(task, nextSession, 'retry: first attempt failed -- ' + canewResult.reason);
   }
