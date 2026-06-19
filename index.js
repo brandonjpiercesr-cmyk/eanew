@@ -590,7 +590,7 @@ async function runCycle() {
   // Step 3: Fire CANEW
   var canewResult = await fireCanew(task, nextSession, null, taskRepo);
   if (!canewResult.ok) {
-    canewResult = await fireCanew(task, nextSession, 'retry: first attempt failed -- ' + canewResult.reason);
+    canewResult = await fireCanew(task, nextSession, 'retry: first attempt failed -- ' + canewResult.reason, taskRepo);
   }
 
   // Step 4: Grade with CANON -- if GAP, deliberate and retry up to 3 times
@@ -613,7 +613,7 @@ async function runCycle() {
     retryTask = 'IMPORTANT FIX FOR RETRY ' + retryAttempt + ': ' + fixAdvice.answer + '\n\nORIGINAL TASK:\n' + retryTask;
 
     // Retry CANEW with the improved task
-    canewResult = await fireCanew(retryTask, nextSession + '_retry' + retryAttempt, 'gap_fix: ' + (canon.gaps || []).map(function(g){return g.reason}).join(', '));
+    canewResult = await fireCanew(retryTask, nextSession + '_retry' + retryAttempt, 'gap_fix: ' + (canon.gaps || []).map(function(g){return g.reason}).join(', '), taskRepo);
     if (!canewResult.ok) break;
 
     // Regrade
