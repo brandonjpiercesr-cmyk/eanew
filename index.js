@@ -568,6 +568,28 @@ async function runCycle() {
   LAST_CYCLE_TS = cycleStart;
   console.log('[EANEW] Cycle start:', cycleId, 'HAM:', hamUid);
 
+  // Step 0 (run-of-show): reach the human. The reach IS the surface; the cycle drives it.
+  // When a reach test is active, EANEW taps the reach sweep so each cycle reaches Brandon once
+  // per channel (the sweep is one-per-channel, council-gated). Reaching flows from the cycle.
+  if (process.env.REACH_TEST_ACTIVE === 'on') {
+    try {
+      var reachBase = process.env.AIBEBASE_URL || 'https://aibebase.onrender.com';
+      // mint the intents for this cycle's reach, then sweep to send one per channel
+      await fetch(reachBase + '/reach/test/tick', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hamUid: hamUid, startedAt: new Date(Date.now() - 1800000).toISOString() })
+      }).catch(function () {});
+      var sweepResp = await fetch(reachBase + '/reach/sweep', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hamUid: hamUid })
+      });
+      var sweepData = await sweepResp.json().catch(function () { return {}; });
+      console.log('[EANEW] Cycle reach: swept', (sweepData && sweepData.processed) || 0, 'mode', (sweepData && sweepData.mode) || '?');
+    } catch (e) {
+      console.error('[EANEW] cycle reach error (cycle continues):', e && e.message);
+    }
+  }
+
   // Step 1: Check SPAN -- is there roadmap work?
   var spanMap = await readSpanMap();
   if (!spanMap) {
