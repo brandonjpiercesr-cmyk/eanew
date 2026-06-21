@@ -782,7 +782,7 @@ app.post('/eanew/ask', async function(req, res) {
   var hamUid = body.hamUid || resolveHam();
   var OR = process.env.OPENROUTER_API_KEY;
   if (!OR) return res.json({ ok: false, reason: 'no_openrouter_key' });
-  var model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite';
+  var model = process.env.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-3.5-flash';
   var docPrefix = DOCTRINE_BIBLE ? 'DOCTRINE CONTEXT (authoritative -- always follow):\n\n' + DOCTRINE_BIBLE.slice(0, 12000) + '\n\n---\n\n' : '';
   var systemPrompt = docPrefix + 'AGENT MAP:\n' + getAgentContext() + '\n\n' +
     'You are EANEW, the autonomous Life Assistant Code for the A\u2019NEW ecosystem, acting as Brandon\u2019s business technical analyst. ' +
