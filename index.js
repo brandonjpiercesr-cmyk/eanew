@@ -216,6 +216,23 @@ async function processInbound(teamActivity, hamUid) {
     var content = {};
     try { content = JSON.parse(row.content); } catch(e) {}
 
+    // Self-origin filter: never read A'NEW's OWN outbound (any channel) as a new inbound. An outbound
+    // echo has direction outbound, no real sender, or matches her own reach template. Skip it so the
+    // cycle does not react to itself.
+    var _dir = String(content.direction || content.type || '').toLowerCase();
+    var _sender = content.sender || content.from || content.from_number || '';
+    var _txt = String(content.text || content.body || content.message || row.summary || '');
+    var _isOwnReach = /\bit is A NEW\b/i.test(_txt) || /testing my reach/i.test(_txt) || /A NEW reaching out/i.test(_txt) || /reaching out on behalf/i.test(_txt);
+    var _isOutbound = _dir.indexOf('out') >= 0 || _dir.indexOf('sent') >= 0 || _dir === 'delivered';
+    if (_isOutbound || _isOwnReach || (!_sender && row.agent_global === 'WREN')) {
+      // mark processed so we do not re-scan it, then skip
+      try { await brainWrite({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'RESULT',
+        acl_stamp: '\u2b21B:eanew.inbound.processed:RESULT:self_echo_skipped:' + Date.now() + '\u2b21',
+        source: 'eanew.inbound.processed.' + row.id, summary: '[EANEW] skipped own outbound echo', importance: 1,
+        content: JSON.stringify({ skipped: 'self_origin', rowId: row.id }) }); } catch (e2) {}
+      continue;
+    }
+
     // Route based on agent
     var routeSummary = '';
     if (row.agent_global === 'IMAN') {
