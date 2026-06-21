@@ -1,0 +1,157 @@
+{
+  "action": "CANEW_fix_truncation",
+  "steps": [
+    {
+      "step": 1,
+      "operation": "github_read",
+      "params": {
+        "repo": "EANEW",
+        "file": "core/ask.js",
+        "branch": "main"
+      },
+      "acl_stamp": "⬡B:CORE:FIX:ASK_TRUNCATE:20260621⬡"
+    },
+    {
+      "step": 2,
+      "operation": "github_read",
+      "params": {
+        "repo": "EANEW",
+        "file": "core/askHandler.mjs",
+        "branch": "main"
+      },
+      "acl_stamp": "⬡B:CORE:FIX:ASK_TRUNCATE:20260621⬡"
+    },
+    {
+      "step": 3,
+      "operation": "search_inside_core",
+      "params": {
+        "repo": "EANEW",
+        "directory": "core",
+        "pattern": "max_tokens"
+      }
+    },
+    {
+      "step": 4,
+      "operation": "search_inside_core",
+      "params": {
+        "repo": "EANEW",
+        "directory": "core",
+        "pattern": ".slice\\(0,"
+      }
+    },
+    {
+      "step": 5,
+      "operation": "search_inside_core",
+      "params": {
+        "repo": "EANEW",
+        "directory": "core",
+        "pattern": ".substring\\(0,"
+      }
+    },
+    {
+      "step": 6,
+      "operation": "search_inside_core",
+      "params": {
+        "repo": "EANEW",
+        "directory": "core",
+        "pattern": ".substr\\("
+      }
+    },
+    {
+      "step": 7,
+      "operation": "search_inside_core",
+      "params": {
+        "repo": "EANEW",
+        "directory": "core",
+        "pattern": "truncate"
+      }
+    },
+    {
+      "step": 8,
+      "operation": "github_update",
+      "params": {
+        "repo": "EANEW",
+        "file": "core/ask.js",
+        "branch": "main",
+        "changes": [
+          {
+            "oldPattern": "max_tokens: 64",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 100",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 128",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 256",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": ".slice\\(0,",
+            "newPattern": "// removed slice truncation"
+          },
+          {
+            "oldPattern": ".substring\\(0,",
+            "newPattern": "// removed substring truncation"
+          },
+          {
+            "oldPattern": ".substr\\(",
+            "newPattern": "// removed substr truncation"
+          }
+        ]
+      },
+      "acl_stamp": "⬡B:CORE:FIX:ASK_TRUNCATE:20260621⬡"
+    },
+    {
+      "step": 9,
+      "operation": "github_update",
+      "params": {
+        "repo": "EANEW",
+        "file": "core/askHandler.mjs",
+        "branch": "main",
+        "changes": [
+          {
+            "oldPattern": "max_tokens: 64",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 100",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 128",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": "max_tokens: 256",
+            "newPattern": "max_tokens: 800"
+          },
+          {
+            "oldPattern": ".slice\\(0,",
+            "newPattern": "// removed slice truncation"
+          },
+          {
+            "oldPattern": ".substring\\(0,",
+            "newPattern": "// removed substring truncation"
+          },
+          {
+            "oldPattern": ".substr\\(",
+            "newPattern": "// removed substr truncation"
+          }
+        ]
+      },
+      "acl_stamp": "⬡B:CORE:FIX:ASK_TRUNCATE:20260621⬡"
+    },
+    {
+      "step": 10,
+      "operation": "github_commit_message",
+      "params": {
+        "message": "⬡B:CORE:FIX:ASK_TRUNCATE:20260621⬡ \n\nFix truncation: raised max_tokens to 800, removed string slice/substring/substr on answer in ask path. Also prepended acl_stamp to commit body for traceability."
+      }
+    }
+  ]
+}
