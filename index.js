@@ -221,10 +221,14 @@ async function processInbound(teamActivity, hamUid) {
     // cycle does not react to itself.
     var _dir = String(content.direction || content.type || '').toLowerCase();
     var _sender = content.sender || content.from || content.from_number || '';
-    var _txt = String(content.text || content.body || content.message || row.summary || '');
+    var _subject = String(content.subject || '');
+    var _txt = String(content.text || content.body || content.message || row.summary || '') + ' ' + _subject;
     var _isOwnReach = /\bit is A NEW\b/i.test(_txt) || /testing my reach/i.test(_txt) || /A NEW reaching out/i.test(_txt) || /reaching out on behalf/i.test(_txt);
     var _isOutbound = _dir.indexOf('out') >= 0 || _dir.indexOf('sent') >= 0 || _dir === 'delivered';
-    if (_isOutbound || _isOwnReach || (!_sender && row.agent_global === 'WREN')) {
+    // Her own send addresses: an inbound FROM one of these is her own email bouncing in the thread.
+    var _ownAddrs = (process.env.ANEW_SEND_ADDRESSES || 'aba@globalmajoritygroup.com').toLowerCase().split(',').map(function (x) { return x.trim(); });
+    var _fromSelf = _ownAddrs.indexOf(String(_sender).toLowerCase().trim()) >= 0;
+    if (_isOutbound || _isOwnReach || _fromSelf || (!_sender && row.agent_global === 'WREN')) {
       // mark processed so we do not re-scan it, then skip
       try { await brainWrite({ ham_uid: hamUid, agent_global: 'EANEW', stamp_type: 'RESULT',
         acl_stamp: '\u2b21B:eanew.inbound.processed:RESULT:self_echo_skipped:' + Date.now() + '\u2b21',
