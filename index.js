@@ -34,7 +34,8 @@ async function cycle(){
   // CANEW has no /drain endpoint. EANEW reads SPAN queue and calls /canew/build per task.
   try{
     var AIBEBASE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
-    var nextTaskResp=await fetch(AIBEBASE+'/span/next-task?hamUid=DC499D0C',{headers:{'Content-Type':'application/json'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    // ⬡B:eanew.cycle:FIX:span_post:20260623⬡ /span/next-task is POST not GET
+var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:'DC499D0C'})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     var drained=0;
     if(nextTaskResp&&nextTaskResp.task){
       var task=nextTaskResp.task;
