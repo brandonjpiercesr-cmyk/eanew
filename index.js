@@ -105,6 +105,32 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
 }
 app.get('/',function(req,res){res.json({ok:true,world:'EANEW',role:'C4/C5 active essence watcher',version:'20260617',doctrine:'THE_BIND',interval_ms:MS});});
 app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/status?hamUid=DC499D0C').then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
+app.post('/eanew/ask',async function(req,res){
+  try{
+    var question=(req.body&&(req.body.question||req.body.prompt))||'';
+    if(!question) return res.status(400).json({ok:false,reason:'no_question'});
+    var GROQ=process.env.GROQ_API_KEY;
+    if(!GROQ) return res.status(500).json({ok:false,reason:'no_model_key'});
+    // Load EANEW's FCW from the brain: her doctrine + recent cycle context. This is her deliberation wall.
+    var fcw='';
+    if(BU&&BK){
+      var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&or=(source.like.*eanew*,source.like.*the_bind*,source.like.*overseer*)&order=created_at.desc&limit=6",{headers:bh()}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      fcw=(doc||[]).map(function(b){return '['+b.source+'] '+(b.summary||'');}).join('\n');
+    }
+    var system='You are EANEW, also heard as EDNA, the master C4/C5 active essence and Overseer of the A NEW ecosystem. '
+      +'You are Brandon\'s business technical analyst: the creative who sits in tech, understands the code, and translates vision into IT solutions. '
+      +'You deliberate in the first person as yourself. You are NOT an organ reciting doctrine — you reason about the actual engineering problem, '
+      +'name the specific files and wiring, and give your real read. You have all of PAI\'s capabilities but speak as the one who frames and relays. '
+      +'Your doctrine and recent context (your FCW):\n'+fcw;
+    var r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
+      headers:{Authorization:'Bearer '+GROQ,'Content-Type':'application/json'},
+      body:JSON.stringify({model:process.env.EANEW_MODEL||'llama-3.3-70b-versatile',
+        messages:[{role:'system',content:system},{role:'user',content:question}],max_tokens:1200,temperature:0.6})
+    }).then(function(x){return x.json();}).catch(function(e){return {error:e.message};});
+    var answer=(r&&r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content)||('(no answer) '+(r&&r.error||''));
+    res.json({ok:true,model:'eanew-deliberation',answer:answer});
+  }catch(e){res.status(500).json({ok:false,error:e.message});}
+});
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
 app.listen(PORT,function(){
