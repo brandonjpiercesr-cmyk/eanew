@@ -52,10 +52,25 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:'DC499D0C',sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
-      if(buildResp&&buildResp.ok){drained=1;}
+      if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;}
       r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:buildResp&&buildResp.path};
     } else {
+      // ⬡B:eanew.cycle:FIX:span_circuit_breaker:20260624⬡ EANEW detects broken SPAN
+      if(!global._eanewNullCycles) global._eanewNullCycles=0;
+      global._eanewNullCycles++;
       r.checks.tasks={drained:0,note:'span_had_nothing'};
+      if(global._eanewNullCycles>=3){
+        try{
+          var statusR=await fetch(AIBEBASE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+          if(statusR&&statusR.pending>0){
+            global._eanewNullCycles=0;
+            r.checks.tasks.circuit_breaker_fired=true;
+            await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({task:'TARGET FILE: coding-department/span.js\n\nSPAN is broken — /span/next-task returns null but /span/status shows '+statusR.pending+' pending tasks. Add readNextTask function: fetches stamp_type=TASK&source=like.span.task* with limit=100, filters by spec.label, excludes done sources, returns highest importance pending task.',repo:'anew',hamUid:'847392',sessionId:'eanew_circuit_'+Date.now()})
+            }).catch(function(){});
+          }
+        }catch(e){ r.checks.tasks.circuit_err=e.message; }
+      }
     }
   }catch(e){r.checks.tasks={err:e.message};}
   // 3. Service health
