@@ -46,9 +46,37 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
       var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
       var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
+      // DYNAMIC FCW: read the current target file from GitHub before dispatching
+      // This is what makes CANEW build real code instead of scaffold
+      // Without this, she builds from training patterns and hallucinates the interface
+      var dynamicFCW='';
+      if(targetFile && process.env.GITHUB_TOKEN){
+        try{
+          var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+targetFile;
+          var ghResp=await fetch(ghUrl,{headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+          if(ghResp&&ghResp.content){
+            var existingFile=Buffer.from(ghResp.content,'base64').toString('utf8');
+            dynamicFCW='\n\n=== CURRENT FILE (read this BEFORE writing anything) ===\nFile: '+targetFile+'\n'+existingFile.slice(0,3000)+'\n=== END CURRENT FILE ===\n';
+          } else {
+            dynamicFCW='\n\n=== TARGET FILE DOES NOT EXIST YET — build it from scratch ===\nFile: '+targetFile+'\n';
+          }
+        }catch(e){dynamicFCW='';/* non-fatal — build without it */}
+      }
+      // Also fetch package.json dep list as the allowlist
+      var depAllowlist='';
+      try{
+        var pkgResp=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/package.json',
+          {headers:{Authorization:'Bearer '+(process.env.GITHUB_TOKEN||''),'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+        if(pkgResp&&pkgResp.content){
+          var pkg=JSON.parse(Buffer.from(pkgResp.content,'base64').toString('utf8'));
+          var deps=Object.keys(pkg.dependencies||{}).concat(Object.keys(pkg.devDependencies||{}));
+          depAllowlist='\n\n=== ALLOWED DEPENDENCIES (only these + Node built-ins) ===\n'+deps.join(', ')+'\n=== END DEPS ===\n';
+        }
+      }catch(e){}
       var taskForCanew=targetFile
-        ? 'TARGET FILE: '+targetFile+'\n\nSPEC:\n'+innerSpec
+        ? 'TARGET FILE: '+targetFile+dynamicFCW+depAllowlist+'\n\nSPEC:\n'+innerSpec
         : innerSpec;
+
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:'DC499D0C',sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
