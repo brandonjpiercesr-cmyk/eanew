@@ -39,9 +39,18 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
     var drained=0;
     if(nextTaskResp&&nextTaskResp.task){
       var task=nextTaskResp.task;
-      var taskSpec=(task.spec||task.task||'');
+      // task.spec is the full parsed content object {label,targetFile,spec:'...'}.
+      // Extract the inner spec string (build instructions) and targetFile for CANEW.
+      // ⬡B:eanew.cycle:FIX:task_spec_extraction:20260624⬡
+      var innerSpec=(task.spec&&task.spec.spec)||task.spec||task.task||'';
+      if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
+      var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
+      var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
+      var taskForCanew=targetFile
+        ? 'TARGET FILE: '+targetFile+'\n\nSPEC:\n'+innerSpec
+        : innerSpec;
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskSpec,repo:task.repo||'anew',hamUid:'DC499D0C',sessionId:'eanew_'+Date.now()})
+        body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:'DC499D0C',sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       if(buildResp&&buildResp.ok){drained=1;}
       r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:buildResp&&buildResp.path};
