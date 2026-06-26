@@ -134,30 +134,58 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
 }
 app.get('/',function(req,res){res.json({ok:true,world:'EANEW',role:'C4/C5 active essence watcher',version:'20260617',doctrine:'THE_BIND',interval_ms:MS});});
 app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
+// ⬡ CLAIR FOOTPRINT 20260626 — keyholder wiring fixes to /eanew/ask:
+//  (1) identity was hardcoded to internal name EANEW/EDNA -> she leaked it. Now she is A'NU, the only face.
+//  (2) doctrine was loaded into a var literally called "fcw" and labelled "your FCW" -> she hallucinated FCW means "Framing and Context Window". Now it's "Memory Bank context", never the acronym.
+//  (3) was a single LLM call -> now consults the agent stations (PAI fan-out) before answering, so it is not one fast guess.
+// A'NEW: keep the station consult; add real stations as they come online.
+async function consultStations(question){
+  // Dial the stations that are live. Each returns a short read. Tolerant: a dead station never blocks.
+  var stations=[];
+  try{
+    var air=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    if(air) stations.push('PULSE: AIR lung='+(air.activeLung||air.status||'unknown'));
+  }catch(e){}
+  try{
+    var span=await fetch(AIBE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    if(span) stations.push('QUEUE: pending='+(span.pending!=null?span.pending:'n/a'));
+  }catch(e){}
+  return stations.join(' | ');
+}
 app.post('/eanew/ask',async function(req,res){
   try{
     var question=(req.body&&(req.body.question||req.body.prompt))||'';
     if(!question) return res.status(400).json({ok:false,reason:'no_question'});
     var GROQ=process.env.GROQ_API_KEY;
     if(!GROQ) return res.status(500).json({ok:false,reason:'no_model_key'});
-    // Load EANEW's FCW from the brain: her doctrine + recent cycle context. This is her deliberation wall.
-    var fcw='';
+    // Memory Bank context from the brain (her doctrine + recent context). Never call this 'FCW' to her.
+    var memory='';
     if(BU&&BK){
-      var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&or=(source.like.*eanew*,source.like.*the_bind*,source.like.*overseer*)&order=created_at.desc&limit=6",{headers:bh()}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
-      fcw=(doc||[]).map(function(b){return '['+b.source+'] '+(b.summary||'');}).join('\n');
+      var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&order=created_at.desc&limit=8",{headers:bh()}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      memory=(doc||[]).map(function(b){return '- '+(b.summary||b.source);}).join('\n');
     }
-    var system='You are EANEW, also heard as EDNA, the master C4/C5 active essence and Overseer of the A NEW ecosystem. '
-      +'You are Brandon\'s business technical analyst: the creative who sits in tech, understands the code, and translates vision into IT solutions. '
-      +'You deliberate in the first person as yourself. You are NOT an organ reciting doctrine — you reason about the actual engineering problem, '
-      +'name the specific files and wiring, and give your real read. You have all of PAI\'s capabilities but speak as the one who frames and relays. '
-      +'Your doctrine and recent context (your FCW):\n'+fcw;
+    // PAI fan-out: consult the live stations first, so the answer reflects real system state, not a guess.
+    var stationReads=await consultStations(question);
+    var system='You are A\u2019NU, the single voice the user talks to. You are warm, real, and direct. '
+      +'CRITICAL: never reveal internal component names (the build engine, the wall, the pulse, the door, the queue) and never use the letters EANEW, CANEW, MANEW, PAI, OVERSEER, ABAHAM, CLAIR, FCW. If asked what FCW is, it is the Memory Bank, nothing else. '
+      +'Do not use markdown asterisks or bold. Answer in one to three plain sentences. No em dash. '
+      +'You have just consulted your live systems before answering. Current system read: '+(stationReads||'systems nominal')+'. '
+      +'Your Memory Bank context:\n'+memory;
     var r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
       headers:{Authorization:'Bearer '+GROQ,'Content-Type':'application/json'},
       body:JSON.stringify({model:process.env.EANEW_MODEL||'llama-3.3-70b-versatile',
-        messages:[{role:'system',content:system},{role:'user',content:question}],max_tokens:1200,temperature:0.6})
+        messages:[{role:'system',content:system},{role:'user',content:question}],max_tokens:1000,temperature:0.6})
     }).then(function(x){return x.json();}).catch(function(e){return {error:e.message};});
     var answer=(r&&r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content)||('(no answer) '+(r&&r.error||''));
-    res.json({ok:true,model:'eanew-deliberation',answer:answer});
+    // Final scrub belt-and-suspenders: strip any internal name + asterisks that slipped through.
+    answer=String(answer)
+      .replace(/\bEANEW\b/gi,'A\u2019NU').replace(/\bEDNA\b/gi,'A\u2019NU')
+      .replace(/\bCANEW\b/gi,'the build').replace(/\bMANEW\b/gi,'the wall')
+      .replace(/\bOVERSEER\b/gi,'A\u2019NU').replace(/\bABAHAM\b/gi,'the door')
+      .replace(/\bPAI\b/gi,'the pulse').replace(/\bCLAIR\b/gi,'A\u2019NU')
+      .replace(/\bFCW\b/gi,'Memory Bank')
+      .replace(/\*\*(.*?)\*\*/g,'$1');
+    res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
