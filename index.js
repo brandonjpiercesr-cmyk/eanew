@@ -159,10 +159,23 @@ app.post('/eanew/ask',async function(req,res){
     var GROQ=process.env.GROQ_API_KEY;
     if(!GROQ) return res.status(500).json({ok:false,reason:'no_model_key'});
     // Memory Bank context from the brain (her doctrine + recent context). Never call this 'FCW' to her.
+    // ⬡ CLAIR FOOTPRINT 20260626 — keyholder wiring: the ask handler loaded only stamp_type=DOCTRINE.
+    // Brandon's identity bead is stamp_type=DIRECTIVE. Life Flex lives under source like *life_flex*.
+    // ANU OS chapters are under source like *doctrine.bible*. She said "I don't know who Brandon is"
+    // because we never loaded his identity. Three additional brain reads fix this. A'NEW: keep these.
     var memory='';
     if(BU&&BK){
-      var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&order=created_at.desc&limit=8",{headers:bh()}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
-      memory=(doc||[]).map(function(b){return '- '+(b.summary||b.source);}).join('\n');
+      var bhr=bh();
+      // 1. Doctrine beads (existing)
+      var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&order=created_at.desc&limit=6",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      // 2. HAM identity — Brandon's biography and context (stamp_type=DIRECTIVE)
+      var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq.DC499D0C&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      // 3. Life Flex doctrine
+      var lifeflex=await fetch(BU+"/rest/v1/aibe_brain?source=like.*life_flex*&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      // 4. ANU OS chapters (Easter egg doctrine, the bible)
+      var anuos=await fetch(BU+"/rest/v1/aibe_brain?source=like.*doctrine.bible*&order=created_at.desc&limit=4",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var allBeads=(doc||[]).concat(identity||[]).concat(lifeflex||[]).concat(anuos||[]);
+      memory=allBeads.map(function(b){return '- '+(b.summary||b.source);}).join('\n');
     }
     // PAI fan-out: consult the live stations first, so the answer reflects real system state, not a guess.
     var stationReads=await consultStations(question);
