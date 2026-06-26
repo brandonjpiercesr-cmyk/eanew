@@ -82,7 +82,27 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;}
-      r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:buildResp&&buildResp.path};
+      // OUTCOME VERIFY (research-backed: Anthropic Outcomes pattern)
+      // Confirm the commit actually landed before claiming success or reaching out.
+      var verifiedBuild=false; var builtPath=buildResp&&buildResp.path;
+      if(buildResp&&buildResp.ok&&builtPath&&process.env.GITHUB_TOKEN){
+        try{
+          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+builtPath,
+            {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
+          if(vr.ok){ verifiedBuild=true; }
+          else{ await stamp({summary:'[EANEW ALERT] phantom commit: '+builtPath+' not found on GitHub after build claimed ok',type:'PHANTOM'}); }
+        }catch(ve){ /* non-fatal */ }
+      }
+      // AUTONOMOUS REACH (research-backed: loop acts on outcomes)
+      // When a real verified build completes, tell Brandon what was built.
+      if(verifiedBuild&&builtPath){
+        try{
+          await fetch(AIBE+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({hamUid:HAM_UID,prompt:'You just committed a real build to the repository. The file is: '+builtPath+'. Tell Brandon what you built in one or two sentences, in plain language, no internal component names, no asterisks. Be specific about what the file does for him.',fallback:'Build complete — '+builtPath+' is live.'})
+          });
+        }catch(re){ /* non-fatal — reach is best-effort */ }
+      }
+      r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:builtPath,verified:verifiedBuild};
     } else {
       // ⬡B:eanew.cycle:FIX:span_circuit_breaker:20260624⬡ EANEW detects broken SPAN
       if(!global._eanewNullCycles) global._eanewNullCycles=0;
@@ -128,6 +148,19 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
     } else {r.checks.lifeFlex={sends:lfData.sends};}
   }
   r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0);
+  // MEETING MINUTES (research-backed: Anthropic Dreaming / Steinberger self-awareness)
+  // Stamp first-person deliberation so the next cycle knows what this cycle did.
+  // Rolling memory: load last 3 MINUTES beads at start of next cycle.
+  var minutesContent='Cycle at '+r.ts+'. Checked AIR: '+(r.checks&&r.checks.air?JSON.stringify(r.checks.air):'{}')+'. Tasks: '+(r.checks&&r.checks.tasks?JSON.stringify(r.checks.tasks):'{}')+'. Health: '+(r.checks&&r.checks.health?JSON.stringify(r.checks.health):'{}');
+  if(BU&&BK){
+    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'MINUTES',
+        acl_stamp:'\u2b21B:eanew.minutes:MINUTES:cycle:'+Date.now()+'\u2b21',
+        source:'eanew.minutes.'+Date.now(),importance:6,
+        summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
+    }).catch(function(){});
+  }
   await stamp(r);
   console.log('[EANEW]',r.summary);
   return r;
