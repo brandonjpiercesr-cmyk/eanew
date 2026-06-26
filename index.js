@@ -182,18 +182,41 @@ app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/statu
 //  (2) doctrine was loaded into a var literally called "fcw" and labelled "your FCW" -> she hallucinated FCW means "Framing and Context Window". Now it's "Memory Bank context", never the acronym.
 //  (3) was a single LLM call -> now consults the agent stations (PAI fan-out) before answering, so it is not one fast guess.
 // A'NEW: keep the station consult; add real stations as they come online.
+// ⬡ CLAIR FOOTPRINT 20260626 — VW 911 #1: Independent Thinking Stations expanded from 2 to 5 real C2 nodes.
+// Every agent is a real deliberating node. A'NU consults all before answering.
+// Research basis: Anthropic orchestrator-worker pattern. No answer without council.
 async function consultStations(question){
-  // Dial the stations that are live. Each returns a short read. Tolerant: a dead station never blocks.
-  var stations=[];
+  var stations=[]; var start=Date.now();
+  // Station 1: AIR pulse
   try{
     var air=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
-    if(air) stations.push('PULSE: AIR lung='+(air.activeLung||air.status||'unknown'));
+    if(air) stations.push('PULSE: AIR lung='+(air.activeLung||air.status||'idle'));
   }catch(e){}
+  // Station 2: SPAN queue
   try{
     var span=await fetch(AIBE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     if(span) stations.push('QUEUE: pending='+(span.pending!=null?span.pending:'n/a'));
   }catch(e){}
-  return stations.join(' | ');
+  // Station 3: CANON doctrine check
+  try{
+    var canon=await fetch(AIBE+'/canon/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,code:'station_check'})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    if(canon) stations.push('CANON: '+((canon.verdict||'?')+' gaps='+(canon.gaps||[]).length));
+  }catch(e){}
+  // Station 4: OVERSEER recent MINUTES (what she did last cycle — rolling self-awareness)
+  try{
+    if(BU&&BK){
+      var mins=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.MINUTES&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      if(mins&&mins[0]) stations.push('LAST_WORK: '+(mins[0].summary||'').replace('[EANEW MINUTES] ','').slice(0,60));
+    }
+  }catch(e){}
+  // Station 5: SCW for this HAM (offline bootstrap if available)
+  try{
+    if(BU&&BK){
+      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
+    }
+  }catch(e){}
+  return stations.join(' | ')+' ['+Math.round(Date.now()-start)+'ms]';
 }
 app.post('/eanew/ask',async function(req,res){
   try{
