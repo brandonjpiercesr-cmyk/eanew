@@ -95,12 +95,22 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       }
       // AUTONOMOUS REACH (research-backed: loop acts on outcomes)
       // When a real verified build completes, tell Brandon what was built.
-      if(verifiedBuild&&builtPath){
+      // REACH COOLDOWN: max once per 2 hours. She was spamming every 3-min cycle.
+      var TWO_HOURS=2*60*60*1000;
+      if(!global._lastAutoReachMs) global._lastAutoReachMs=0;
+      var reachCooldownOk=(Date.now()-global._lastAutoReachMs)>TWO_HOURS;
+      // Only reach on meaningful files — not game console, not anew.self, not test files
+      var BORING_FILES=['anew.self','game.console','game-console','canew','test.verify'];
+      var isInteresting=builtPath&&!BORING_FILES.some(function(x){return (builtPath||'').indexOf(x)>=0;});
+      if(verifiedBuild&&builtPath&&reachCooldownOk&&isInteresting){
         try{
+          global._lastAutoReachMs=Date.now();
           await fetch(AIBE+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({hamUid:HAM_UID,prompt:'You just committed a real build to the repository. The file is: '+builtPath+'. Tell Brandon what you built in one or two sentences, in plain language, no internal component names, no asterisks. Be specific about what the file does for him.',fallback:'Build complete — '+builtPath+' is live.'})
+            body:JSON.stringify({hamUid:HAM_UID,
+              prompt:'You just committed real code to '+builtPath+'. In ONE short sentence tell Brandon specifically what '+builtPath+' does — what feature it enables, what problem it solves. No generic descriptions. No internal names.',
+              fallback:'New build live: '+builtPath+'.'})
           });
-        }catch(re){ /* non-fatal — reach is best-effort */ }
+        }catch(re){ /* non-fatal */ }
       }
       r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:builtPath,verified:verifiedBuild};
     } else {
@@ -204,7 +214,8 @@ app.post('/eanew/ask',async function(req,res){
       // 2. HAM identity — Brandon's biography and context (stamp_type=DIRECTIVE)
       var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq.DC499D0C&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 3. Life Flex doctrine
-      var lifeflex=await fetch(BU+"/rest/v1/aibe_brain?source=like.*life_flex*&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      // FIXED: old query loaded TASK stubs (no useful content). Load SEAL bead which has the real fired event.
+      var lifeflex=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.SEAL&source=like.life_flex*&order=created_at.desc&limit=2",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 4. ANU OS chapters (Easter egg doctrine, the bible)
       var anuos=await fetch(BU+"/rest/v1/aibe_brain?source=like.*doctrine.bible*&order=created_at.desc&limit=4",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       var allBeads=(doc||[]).concat(identity||[]).concat(lifeflex||[]).concat(anuos||[]);
