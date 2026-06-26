@@ -8,12 +8,13 @@ var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
 var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
 var RKEY=process.env.RENDER_API_KEY;
 var MS=3*60*1000;
+var HAM_UID=process.env.HAM_UID||'DC499D0C'; // ANU OS ch18: env-driven, Variable Machine
 function bh(){return {apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'};}
 async function stamp(payload){
   if(!BU||!BK)return;
   await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
     headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-    body:JSON.stringify({ham_uid:'DC499D0C',agent_global:'EANEW',
+    body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',
       acl_stamp:'⬡B:eanew.watcher:RESULT:cycle:20260617⬡',stamp_type:'RESULT',
       source:'eanew.cycle.'+Date.now(),content:JSON.stringify(payload),
       summary:'[EANEW] '+payload.summary,importance:7})
@@ -23,9 +24,9 @@ async function cycle(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
-    var a=await fetch(AIBE+'/air/status?hamUid=DC499D0C').then(function(x){return x.json();});
+    var a=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});
     if(!a.activeLung||a.status==='idle'){
-      await fetch(AIBE+'/air/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:'DC499D0C',source:'eanew'})});
+      await fetch(AIBE+'/air/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,source:'eanew'})});
       r.checks.air={tapped:true};
     } else {r.checks.air={lung:a.activeLung};}
   }catch(e){r.checks.air={err:e.message};}
@@ -35,7 +36,7 @@ async function cycle(){
   try{
     var AIBEBASE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
     // ⬡B:eanew.cycle:FIX:span_post:20260623⬡ /span/next-task is POST not GET
-var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:'DC499D0C'})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     var drained=0;
     if(nextTaskResp&&nextTaskResp.task){
       var task=nextTaskResp.task;
@@ -78,7 +79,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         : innerSpec;
 
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:'DC499D0C',sessionId:'eanew_'+Date.now(),label:taskLabel})
+        body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;}
       r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:buildResp&&buildResp.path};
@@ -132,7 +133,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   return r;
 }
 app.get('/',function(req,res){res.json({ok:true,world:'EANEW',role:'C4/C5 active essence watcher',version:'20260617',doctrine:'THE_BIND',interval_ms:MS});});
-app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/status?hamUid=DC499D0C').then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
+app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
 app.post('/eanew/ask',async function(req,res){
   try{
     var question=(req.body&&(req.body.question||req.body.prompt))||'';
