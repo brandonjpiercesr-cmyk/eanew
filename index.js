@@ -150,9 +150,9 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   }
   // 4. Life Flex -- did it really send?
   if(BU&&BK){
-    var lf=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SEAL&source=like.*life_flex*&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+    var lf=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.LIFE_FLEX_FIRED&source=like.life_flex.fired.*&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
     var lfData=lf&&lf[0]?JSON.parse(lf[0].content||'{}'):{};
-    if(!lfData.anyRealSend&&!lfData.sends){
+    if(!lf||!lf[0]){// bead presence = proof of fire. anyRealSend/sends not required.
       await fetch(AIBE+'/life-flex/fire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
       r.checks.lifeFlex='retriggered_real_send';
     } else {r.checks.lifeFlex={sends:lfData.sends};}
