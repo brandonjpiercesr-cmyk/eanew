@@ -157,6 +157,15 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       r.checks.lifeFlex='retriggered_real_send';
     } else {r.checks.lifeFlex={sends:lfData.sends};}
   }
+  // FULL RUN OF SHOW (roadmap #4): real tool access + judgment
+  try {
+    var ros = require('./runofshow');
+    r.checks.iman = await ros.checkIman();
+    r.checks.wren = await ros.checkWren();
+    var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
+    r.checks.surface = ros.judge(cycleData);
+    r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
+  } catch(rosErr) { r.checks.rosError = rosErr.message; }
   r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0);
   // MEETING MINUTES (research-backed: Anthropic Dreaming / Steinberger self-awareness)
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
