@@ -68,4 +68,20 @@ async function stampMinutes(cycleData, surface) {
   return chatter;
 }
 
-module.exports = { checkIman, checkWren, checkAdvisors, judge, stampMinutes };
+
+// ⬡B:eanew.runofshow:FUNCTION:deliberate:20260627⬡
+// deliberate(tasks, brainState) — picks the highest-importance task that has a real spec
+// Returns { chosen: task, reason: string } or { chosen: null, reason: string }
+function deliberate(tasks, brainState) {
+  if (!tasks || !tasks.length) return { chosen: null, reason: 'no tasks in queue' };
+  // Filter to tasks that have a real spec (targetFile or spec field present and non-empty)
+  const candidates = tasks
+    .filter(function(t) { return t && (t.targetFile || (t.spec && (t.spec.targetFile || t.spec.label || t.spec.session))); })
+    .sort(function(a, b) { return (b.importance || 0) - (a.importance || 0); });
+  if (!candidates.length) return { chosen: null, reason: 'no tasks have a real spec (targetFile/spec required)' };
+  const chosen = candidates[0];
+  const label = (chosen.spec && (chosen.spec.label || chosen.spec.session)) || chosen.source || 'unnamed';
+  return { chosen: chosen, reason: 'highest-importance task with real spec: ' + label + ' (importance ' + (chosen.importance || 0) + ')' };
+}
+
+module.exports = { checkIman, checkWren, checkAdvisors, judge, stampMinutes, deliberate };
