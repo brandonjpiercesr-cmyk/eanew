@@ -6,6 +6,7 @@ var express=require('express'); var app=express(); app.use(express.json());
 var AIBE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
 var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
 var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
+var cooldown = null; try { cooldown = require('./cooldown'); } catch(e) { console.log('[EANEW] cooldown not found:', e.message); }
 var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
 var RKEY=process.env.RENDER_API_KEY;
 var MS=3*60*1000;
@@ -31,6 +32,9 @@ async function cycle(){
       r.checks.air={tapped:true};
     } else {r.checks.air={lung:a.activeLung};}
   }catch(e){r.checks.air={err:e.message};}
+  // Cooldown: skip this cycle's task fetch if recently empty
+  var skipTasks = false;
+  if (cooldown && cooldown.shouldSkipCycle && BU && BK) { try { skipTasks = await cooldown.shouldSkipCycle(BU, BK); } catch(e){} }
   // 2. Tasks — read SPAN next-task, then call CANEW /canew/build
   // ⬡B:eanew.cycle:WIRE:span_to_canew_build:20260623⬡
   // CANEW has no /drain endpoint. EANEW reads SPAN queue and calls /canew/build per task.
