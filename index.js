@@ -79,7 +79,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         : innerSpec;
 
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskForCanew,repo:task.repo||'anew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
+        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'anew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;}
       // OUTCOME VERIFY (research-backed: Anthropic Outcomes pattern)
