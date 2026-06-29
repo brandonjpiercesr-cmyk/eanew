@@ -268,9 +268,24 @@ app.post('/eanew/ask',async function(req,res){
     var r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
       headers:{Authorization:'Bearer '+GROQ,'Content-Type':'application/json'},
       body:JSON.stringify({model:process.env.EANEW_MODEL||'llama-3.3-70b-versatile',
-        messages:[{role:'system',content:system},{role:'user',content:question}],max_tokens:1000,temperature:0.6})
-    }).then(function(x){return x.json();}).catch(function(e){return {error:e.message};});
-    var answer=(r&&r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content)||('(no answer) '+(r&&r.error||''));
+        messages:[{role:'system',content:system},{role:'user',content:question}],max_tokens:300,temperature:0.6})
+    }).then(function(x){return x.json();}).catch(function(e){console.error('[eanew/ask groq]',e.message);return {error:e.message};});
+    if(r&&r.error){console.error('[eanew/ask groq error]',JSON.stringify(r));}
+    if(r&&r.message){console.error('[eanew/ask groq msg]',r.message);}
+    var answer=(r&&r.choices&&r.choices[0]&&r.choices[0].message&&r.choices[0].message.content)||null;
+    if(!answer){
+      // Groq failed — try a minimal fallback with just the question, no station context
+      try{
+        var rf=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
+          headers:{Authorization:'Bearer '+GROQ,'Content-Type':'application/json'},
+          body:JSON.stringify({model:'llama-3.1-8b-instant',
+            messages:[{role:'system',content:"You are A\u2019NEW, a direct and warm AI assistant. One to two sentences max. No em dash."},{role:'user',content:question}],
+            max_tokens:150,temperature:0.6})
+        }).then(function(x){return x.json();}).catch(function(e){return null;});
+        answer=rf&&rf.choices&&rf.choices[0]&&rf.choices[0].message&&rf.choices[0].message.content||null;
+      }catch(ef){}
+    }
+    answer=answer||'I hear you. Give me a moment.';
     // Final scrub belt-and-suspenders: strip any internal name + asterisks that slipped through.
     answer=String(answer)
       .replace(/\bEANEW\b/gi,'A\u2019NU').replace(/\bEDNA\b/gi,'A\u2019NU')
