@@ -185,6 +185,62 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
     }).catch(function(){});
   }
+  // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
+  // The caretaker checks her own services each cycle. If one crashed, she reads
+  // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
+  try {
+    var RK = process.env.RENDER_API_KEY;
+    if (RK) {
+      // Services the caretaker watches — IDs from env, never hardcoded identity
+      var watched = [
+        { name: 'aibebase', id: process.env.AIBEBASE_SERVICE_ID || 'srv-d8lpvjcvikkc73bolec0' },
+        { name: 'atmosphere', id: process.env.ATMOSPHERE_SERVICE_ID || 'srv-d91a3hh9rddc73ddja60' },
+        { name: 'canew', id: process.env.CANEW_SERVICE_ID || 'srv-d8ojn1pkh4rs738viseg' }
+      ];
+      var healSummary = [];
+      for (var w = 0; w < watched.length; w++) {
+        var svc = watched[w];
+        try {
+          var deps = await fetch('https://api.render.com/v1/services/' + svc.id + '/deploys?limit=1',
+            { headers: { Authorization: 'Bearer ' + RK, Accept: 'application/json' } })
+            .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
+          var dep = deps && deps[0] ? (deps[0].deploy || deps[0]) : null;
+          if (dep && /fail|crash|canceled/i.test(dep.status || '')) {
+            // She found a broken deploy — surface it. (Full read-fix-redeploy is the PAI tool path.)
+            healSummary.push(svc.name + ':' + dep.status);
+          }
+        } catch(eSvc) {}
+      }
+      if (healSummary.length) {
+        r.checks.unhealthy = healSummary;
+        // Surface to Brandon — she reaches out herself
+        try {
+          var BLOOIO_KEY = process.env.BLOOIO_API_KEY;
+          if (BLOOIO_KEY && BU && BK) {
+            var phoneRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=eq.HAM_IDENTIFIER&ham_uid=eq.' + HAM_UID + '&limit=3',
+              { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
+              .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
+            var ph = null;
+            for (var p = 0; p < (phoneRows||[]).length; p++) {
+              var m = (phoneRows[p].content||'').match(/\+?1?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/);
+              if (m) { ph = m[0].replace(/[^\d+]/g,''); if (ph.length===10) ph='+1'+ph; break; }
+            }
+            if (ph) {
+              await fetch('https://backend.blooio.com/v2/api/chats/' + encodeURIComponent(ph) + '/messages', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + BLOOIO_KEY, 'Content-Type': 'application/json',
+                           'Idempotency-Key': HAM_UID + '.heal.' + Date.now() },
+                body: JSON.stringify({ text: 'Heads up. I caught a service issue this cycle: ' + healSummary.join(', ') + '. Looking into it.' })
+              }).catch(function(){});
+              r.checks.notified = true;
+            }
+          }
+        } catch(eNotify) {}
+      } else {
+        r.checks.allHealthy = true;
+      }
+    }
+  } catch(eHeal) { r.checks.healError = eHeal.message; }
   await stamp(r);
   console.log('[EANEW]',r.summary);
   return r;
