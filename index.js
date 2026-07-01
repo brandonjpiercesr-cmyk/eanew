@@ -22,7 +22,19 @@ async function stamp(payload){
       summary:'[EANEW] '+payload.summary,importance:7})
   }).catch(function(){});
 }
+// CLAIR fix 20260701: overlap guard. Two full cycles ran in the same second
+// (four MINUTES stamps, two identical-timestamp pairs -- observed directly in
+// brain). The interval fires every MS regardless of whether the previous
+// cycle's many awaits have finished, and POST /cycle can land mid-interval
+// too. Every side effect doubled, including the text to Brandon's phone.
+// One cycle at a time, period.
 async function cycle(){
+  if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
+  global._eanewCycleRunning = true;
+  try { return await cycleInner(); }
+  finally { global._eanewCycleRunning = false; }
+}
+async function cycleInner(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
@@ -108,14 +120,43 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var BORING_FILES=['anew.self','game.console','game-console','canew','test.verify'];
       var isInteresting=builtPath&&!BORING_FILES.some(function(x){return (builtPath||'').indexOf(x)>=0;});
       if(verifiedBuild&&builtPath&&reachCooldownOk&&isInteresting){
+        // CLAIR fix 20260701: real incident traced. Brandon got 'New build live:
+        // advisors/master-advisor.js.' twice. Two causes, both real: (1) this
+        // cooldown lives in memory and resets to zero on every restart/deploy --
+        // and tonight had a dozen deploys -- and (2) overlapping cycles raced
+        // past the check in the same second before either set it. Durable fix:
+        // a REACH_SENT bead in the brain, checked before texting and stamped
+        // before the send, so neither a restart nor an overlapping cycle can
+        // double-text him again. Marker stamped BEFORE the send on purpose:
+        // a crash mid-reach errs toward silence, never toward a duplicate.
+        var alreadyReached=false;
         try{
-          global._lastAutoReachMs=Date.now();
-          await fetch(AIBE+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({hamUid:HAM_UID,
-              prompt:'You just committed real code to '+builtPath+'. In ONE short sentence tell Brandon specifically what '+builtPath+' does — what feature it enables, what problem it solves. No generic descriptions. No internal names.',
-              fallback:'New build live: '+builtPath+'.'})
-          });
-        }catch(re){ /* non-fatal */ }
+          var rr=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.REACH_SENT&source=like.eanew.reach.*&order=created_at.desc&limit=1',
+            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+            .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+          if(rr&&rr[0]){
+            var sameFile=((rr[0].content||'').indexOf(builtPath)>=0);
+            var withinWindow=(Date.now()-new Date(rr[0].created_at).getTime())<TWO_HOURS;
+            if(sameFile||withinWindow) alreadyReached=true;
+          }
+        }catch(rq){}
+        if(!alreadyReached){
+          try{
+            global._lastAutoReachMs=Date.now();
+            await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+              headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+              body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'REACH_SENT',
+                source:'eanew.reach.'+Date.now(),
+                acl_stamp:'\u2b21B:eanew.reach:REACH_SENT:build_notify:20260701\u2b21',
+                summary:'[REACH_SENT] '+builtPath,content:builtPath,importance:5})
+            }).catch(function(){});
+            await fetch(AIBE+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({hamUid:HAM_UID,
+                prompt:'You just committed real code to '+builtPath+'. In ONE short sentence tell Brandon specifically what '+builtPath+' does -- what feature it enables, what problem it solves. No generic descriptions. No internal names.',
+                fallback:'New build live: '+builtPath+'.'})
+            });
+          }catch(re){ /* non-fatal */ }
+        }
       }
       r.checks.tasks={drained:drained,task:task.label||task.source,buildOk:!!(buildResp&&buildResp.ok),buildPath:builtPath,verified:verifiedBuild};
     } else {
