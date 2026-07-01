@@ -84,7 +84,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         : innerSpec;
 
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'anew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
+        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;}
       // OUTCOME VERIFY (research-backed: Anthropic Outcomes pattern)
@@ -128,10 +128,27 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
           var statusR=await fetch(AIBEBASE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
           if(statusR&&statusR.pending>0){
             global._eanewNullCycles=0;
+            // CLAIR fix 20260701: resetting the counter above only controls when the
+            // NEXT null-streak starts -- it never stopped this exact self-heal request
+            // from firing again every ~9 minutes forever if the underlying condition
+            // (which core/span.query.js's own audit already showed is two independently-
+            // capped queries, not a real bug) never resolves. Confirmed real incident:
+            // this exact block, hardcoded repo:'anew' and hamUid:'847392' (the doctrine
+            // TEST CONSTANT used as a live identity), fired repeatedly and self-labeled
+            // every resulting commit with a banned model name via CANEW's pipeline.
+            // Added an explicit once-per-hour guard on this specific fire, independent
+            // of the null-cycle counter, so it cannot repeat regardless of whether the
+            // underlying SPAN condition ever actually resolves.
+            var _lastCircuitFire=global._lastSpanCircuitFire||0;
+            if(Date.now()-_lastCircuitFire<60*60*1000){
+              r.checks.tasks.circuit_breaker_skipped_cooldown=true;
+            } else {
+            global._lastSpanCircuitFire=Date.now();
             r.checks.tasks.circuit_breaker_fired=true;
             await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({task:'TARGET FILE: coding-department/span.js\n\nSPAN is broken — /span/next-task returns null but /span/status shows '+statusR.pending+' pending tasks. Add readNextTask function: fetches stamp_type=TASK&source=like.span.task* with limit=100, filters by spec.label, excludes done sources, returns highest importance pending task.',repo:'anew',hamUid:'847392',sessionId:'eanew_circuit_'+Date.now()})
+              body:JSON.stringify({task:'TARGET FILE: coding-department/span.js\n\nSPAN is broken — /span/next-task returns null but /span/status shows '+statusR.pending+' pending tasks. Add readNextTask function: fetches stamp_type=TASK&source=like.span.task* with limit=100, filters by spec.label, excludes done sources, returns highest importance pending task.',repo:'canew',hamUid:'SYSTEM',sessionId:'eanew_circuit_'+Date.now()})
             }).catch(function(){});
+            }
           }
         }catch(e){ r.checks.tasks.circuit_err=e.message; }
       }
