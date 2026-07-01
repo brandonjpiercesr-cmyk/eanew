@@ -30,6 +30,21 @@ async function stamp(payload){
 // One cycle at a time, period.
 async function cycle(){
   if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
+  // CLAIR fix 20260701, second layer: the in-memory flag above only guards ONE
+  // process. Duplicate MINUTES pairs with identical timestamps were still landing
+  // with it in place -- Render runs multiple container instances, each with its own
+  // untouched flag. Cross-instance lock: public.try_acquire_cycle_lock() in the
+  // shared brain, atomic UPDATE...WHERE with TTL, race-proven (5 simultaneous
+  // callers, exactly 1 wins). Brain unreachable errs toward running, never stalling.
+  if (BU && BK) {
+    try {
+      var lockR = await fetch(BU+'/rest/v1/rpc/try_acquire_cycle_lock',{method:'POST',
+        headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},
+        body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
+      var got = await lockR.json();
+      if (got !== true) { return { skipped: 'another_instance_holds_lock' }; }
+    } catch(lockE) {}
+  }
   global._eanewCycleRunning = true;
   try { return await cycleInner(); }
   finally { global._eanewCycleRunning = false; }
@@ -106,7 +121,22 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         try{
           var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+builtPath,
             {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
-          if(vr.ok){ verifiedBuild=true; }
+          if(vr.ok){ verifiedBuild=true;
+            // CLAIR fix 20260701: stamp TASK_DONE keyed to the task's own source the
+            // moment the commit is VERIFIED on GitHub. Root cause of the 500-commit
+            // night: PAI kept completing this task and nothing ever stamped a DONE
+            // bead whose source matched, so SPAN re-dispatched it forever.
+            try{
+              await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+                headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+                body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_DONE',
+                  source:(task.source||taskLabel||'unknown')+'.DONE.'+Date.now(),
+                  acl_stamp:'\u2b21B:eanew.task.done:TASK_DONE:verified:20260701\u2b21',
+                  summary:'[TASK_DONE] '+(task.source||taskLabel)+' -- verified on GitHub: '+builtPath,
+                  content:JSON.stringify({taskSource:task.source||null,path:builtPath,sha:buildResp.sha||null}),
+                  importance:8})}).catch(function(){});
+            }catch(tde){}
+          }
           else{ await stamp({summary:'[EANEW ALERT] phantom commit: '+builtPath+' not found on GitHub after build claimed ok',type:'PHANTOM'}); }
         }catch(ve){ /* non-fatal */ }
       }
@@ -340,7 +370,7 @@ async function consultStations(question){
   // Station 5: SCW for this HAM (offline bootstrap if available)
   try{
     if(BU&&BK){
-      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.'+HAM_UID+'&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
@@ -363,7 +393,7 @@ app.post('/eanew/ask',async function(req,res){
       // 1. Doctrine beads (existing)
       var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&order=created_at.desc&limit=6",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 2. HAM identity — Brandon's biography and context (stamp_type=DIRECTIVE)
-      var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq.DC499D0C&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq."+HAM_UID+"&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 3. Life Flex doctrine
       // FIXED: old query loaded TASK stubs (no useful content). Load SEAL bead which has the real fired event.
       var lifeflex=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.SEAL&source=like.life_flex*&order=created_at.desc&limit=2",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
@@ -409,6 +439,13 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\bFCW\b/gi,'Memory Bank')
       .replace(/\*\*(.*?)\*\*/g,'$1');
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
+  }catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.get('/lockstatus',async function(req,res){
+  try{
+    var lr=await fetch(BU+'/rest/v1/eanew_cycle_lock',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'public'}});
+    var lock=await lr.json();
+    res.json({ok:true,fingerprint:'20260701-distlock-v2-eanew-repo',lock:lock&&lock[0]});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
