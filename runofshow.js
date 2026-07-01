@@ -51,19 +51,73 @@ function judge(cycleData) {
   return surface;
 }
 
-// First-person meeting minutes — A'NEW's voice about what she did this cycle
+// CLAIR fix 20260701, founder correction: this was pure string concatenation,
+// zero thought in it, a fill-in-the-blank sentence dressed up as reflection.
+// Real chatter now -- a real Groq call, given only the true facts of the
+// cycle, asked to actually compose a sentence about them, not recite one.
+// Loads the real brain-stored voice doctrine dynamically, same as CANON's
+// Layer 2. Falls back to the honest template if the model is unreachable --
+// marked clearly as a fallback, never silently passed off as real thought.
+async function loadVoiceDoctrine() {
+  try {
+    const r = await fetch(BU + '/rest/v1/aibe_brain?source=eq.doctrine.voice.coffee_shop_test&select=content&limit=1', { headers: bh() });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return (rows && rows[0]) ? rows[0].content : null;
+  } catch (e) { return null; }
+}
+
+async function composeChatter(cycleData, surface) {
+  const GROQ = process.env.GROQ_API_KEY;
+  const facts = {
+    air: cycleData.air ? 'flowing' : 'still',
+    built: cycleData.built || null,
+    newMail: (cycleData.iman && cycleData.iman.newMail) || 0,
+    surfaceItems: surface || []
+  };
+  if (!GROQ) return null;
+  const voice = await loadVoiceDoctrine();
+  const voiceLine = voice ? ('Your voice: ' + voice) : '';
+  const systemPrompt = [
+    voiceLine,
+    'You are Overseer, watching one build cycle. Write one short first-person',
+    'sentence or two about what actually happened this cycle -- only the facts',
+    'given below, nothing invented. If nothing needs attention, say that plainly.',
+    'No filler, no "as an AI", no throat-clearing. Just what happened.'
+  ].join(' ');
+  const userMsg = 'This cycle: air ' + facts.air + '. Built: ' + (facts.built || 'nothing new') +
+    '. New advisor mail: ' + facts.newMail + '. Needs attention: ' +
+    (facts.surfaceItems.length ? facts.surfaceItems.join('; ') : 'nothing');
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + GROQ, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMsg }], max_tokens: 150, temperature: 0.4 })
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const out = d && d.choices && d.choices[0] ? d.choices[0].message.content : null;
+    return out ? out.trim() : null;
+  } catch (e) { return null; }
+}
+
 async function stampMinutes(cycleData, surface) {
   const ts = Date.now();
   const built = cycleData.built || 'nothing new';
-  const parts = [];
-  parts.push('This cycle I checked the air and it was ' + (cycleData.air ? 'flowing' : 'still') + '.');
-  if (cycleData.built) parts.push('I dispatched a build and it landed: ' + cycleData.built + '.');
-  if (cycleData.iman && cycleData.iman.newMail > 0) parts.push('Saw ' + cycleData.iman.newMail + ' new emails in the advisor inboxes.');
-  if (surface.length) parts.push('Flagging for Brandon: ' + surface.join('; ') + '.');
-  else parts.push('Nothing needs Brandon right now, everything is steady.');
-  const chatter = parts.join(' ');
+  let chatter = await composeChatter(cycleData, surface);
+  let real = true;
+  if (!chatter) {
+    real = false;
+    const parts = [];
+    parts.push('This cycle I checked the air and it was ' + (cycleData.air ? 'flowing' : 'still') + '.');
+    if (cycleData.built) parts.push('I dispatched a build and it landed: ' + cycleData.built + '.');
+    if (cycleData.iman && cycleData.iman.newMail > 0) parts.push('Saw ' + cycleData.iman.newMail + ' new emails in the advisor inboxes.');
+    if (surface.length) parts.push('Flagging for Brandon: ' + surface.join('; ') + '.');
+    else parts.push('Nothing needs Brandon right now, everything is steady.');
+    chatter = parts.join(' ');
+  }
   try {
-    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, surface: surface, built: built, ts: ts }) }) });
+    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, real: real, surface: surface, built: built, ts: ts }) }) });
   } catch(e) {}
   return chatter;
 }
