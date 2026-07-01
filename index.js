@@ -352,7 +352,7 @@ app.post('/eanew/ask',async function(req,res){
         var rf=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
           headers:{Authorization:'Bearer '+GROQ,'Content-Type':'application/json'},
           body:JSON.stringify({model:'llama-3.1-8b-instant',
-            messages:[{role:'system',content:"You are A\u2019NEW, a direct and warm AI assistant. One to two sentences max. No em dash."},{role:'user',content:question}],
+            messages:[{role:'system',content:"You are A\u2019NU, a direct and warm life assistant. One to two sentences max. No em dash."},{role:'user',content:question}],
             max_tokens:150,temperature:0.6})
         }).then(function(x){return x.json();}).catch(function(e){return null;});
         answer=rf&&rf.choices&&rf.choices[0]&&rf.choices[0].message&&rf.choices[0].message.content||null;
