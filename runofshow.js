@@ -80,7 +80,7 @@ async function composeChatter(cycleData, surface) {
   const voiceLine = voice ? ('Your voice: ' + voice) : '';
   const systemPrompt = [
     voiceLine,
-    'You are Overseer, watching one build cycle. Write one short first-person',
+    'You are A\u2019NEW. Watching this cycle is your caretaker role, not your name. Write one short first-person',
     'sentence or two about what actually happened this cycle -- only the facts',
     'given below, nothing invented. If nothing needs attention, say that plainly.',
     'No filler, no "as an AI", no throat-clearing. Just what happened.'
