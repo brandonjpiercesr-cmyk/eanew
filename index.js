@@ -328,6 +328,21 @@ async function consultStations(question){
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
+  // Station 6: ADVISOR pulse — the EBC advisor cycles (bdif, gmg, mediators, mh_action)
+  // stamp CONTRIBUTION beads under agent_global=ADVISOR. Overseer never read them, so
+  // she could not surface "GMG had 8 new advisor emails" to Brandon on her own. This
+  // closes the station -> Overseer -> A'NU chain for advisor work. Doctrine: she reports
+  // that advisor activity happened; the EBC firewall keeps client CONTENT in its own
+  // world, so she surfaces the pulse (which world, how much), never cross-client detail.
+  try{
+    if(BU&&BK){
+      var adv=await fetch(BU+"/rest/v1/aibe_brain?agent_global=eq.ADVISOR&stamp_type=eq.CONTRIBUTION&order=created_at.desc&limit=5&select=summary,created_at,ham_uid",{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      if(adv&&adv.length){
+        var fresh=adv.filter(function(a){return (Date.now()-new Date(a.created_at).getTime())<25*60*60*1000;});
+        if(fresh.length) stations.push('ADVISORS: '+fresh.length+' recent cycle(s), latest '+((fresh[0].summary||'').replace('[ADVISOR] ','').slice(0,50)||'reviewed'));
+      }
+    }
+  }catch(e){}
   return stations.join(' | ')+' ['+Math.round(Date.now()-start)+'ms]';
 }
 app.post('/eanew/ask',async function(req,res){
