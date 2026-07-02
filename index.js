@@ -64,20 +64,13 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
       var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
       var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
-      // ⬡B:eanew.cycle:WIRE:one_repo_everywhere:20260702⬡
-      // Bit live 20260702: dispatch honored task.repo while the context read and
-      // the commit verify were pinned to one repo. A build landed in the repo the
-      // dispatch named, the verify looked in a different one, stamped a phantom
-      // alert that was false, and the record split. One variable, used everywhere
-      // this leg names a repo, so context, dispatch, and verify always agree.
-      var repoUsed=(task.repo&&String(task.repo))||'canew';
       // DYNAMIC FCW: read the current target file from GitHub before dispatching
       // This is what makes CANEW build real code instead of scaffold
       // Without this, she builds from training patterns and hallucinates the interface
       var dynamicFCW='';
       if(targetFile && process.env.GITHUB_TOKEN){
         try{
-          var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+targetFile;
+          var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+targetFile;
           var ghResp=await fetch(ghUrl,{headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
           if(ghResp&&ghResp.content){
             var existingFile=Buffer.from(ghResp.content,'base64').toString('utf8');
@@ -90,7 +83,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       // Also fetch package.json dep list as the allowlist
       var depAllowlist='';
       try{
-        var pkgResp=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/package.json',
+        var pkgResp=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/package.json',
           {headers:{Authorization:'Bearer '+(process.env.GITHUB_TOKEN||''),'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
         if(pkgResp&&pkgResp.content){
           var pkg=JSON.parse(Buffer.from(pkgResp.content,'base64').toString('utf8'));
@@ -127,7 +120,15 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       }catch(eFb){ /* non-fatal: dispatch proceeds without feedback */ }
 
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:repoUsed,hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
+        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,
+        // ⬡B:eanew.cycle:FIX:repo_lives_in_spec:20260702⬡
+        // Live incident: every founder task said repo anew, but repo rides inside the
+        // task's content JSON (task.spec.repo) and this line read task.repo -- always
+        // undefined -- so the builder defaulted to canew and her canary commit
+        // (core/llm-conversation-streamer.js, d02ca888) plus three siblings landed in
+        // PAI's own service instead of her body. Same extraction pattern as spec,
+        // targetFile, and label three lines up.
+        repo:(task.spec&&task.spec.repo)||task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       // ⬡B:eanew.cycle:FIX:done_requires_real_commit:20260702⬡
       // W7 done definition, enforced: a SHA alone is not done, but NO sha is
@@ -211,7 +212,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var verifiedBuild=false; var builtPath=buildResp&&buildResp.path;
       if(buildResp&&buildResp.ok&&builtPath&&process.env.GITHUB_TOKEN){
         try{
-          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+builtPath,
+          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+builtPath,
             {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
           if(vr.ok){ verifiedBuild=true; }
           else{ await stamp({summary:'[EANEW ALERT] phantom commit: '+builtPath+' not found on GitHub after build claimed ok',type:'PHANTOM'}); }
@@ -307,34 +308,6 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
   } catch(rosErr) { r.checks.rosError = rosErr.message; }
-  // ⬡B:eanew.warden:WIRE:held_task_release_station:20260702⬡
-  // THE WARDEN -- the role the founder named on 20260702: releasing shelved work
-  // is the caretaker's job, not the keyholder's. Deterministic rule: when the
-  // newest TASK_DONE carrying a real commit sha is YOUNGER than a TASK_HELD's
-  // last give-up, the pipeline has been re-proven since that task was shelved,
-  // so the hold no longer stands. One release per cycle, gradual and safe, and
-  // every release reports up as a WARDEN bead -- nothing happens silently.
-  try {
-    var wProof = await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_DONE&content=like.*%22sha%22*&order=created_at.desc&limit=1&select=created_at,source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
-    if (wProof && wProof[0] && wProof[0].created_at) {
-      var proofTime = wProof[0].created_at;
-      var wHeld = await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_HELD&created_at=lt.'+encodeURIComponent(proofTime)+'&order=importance.desc,created_at.asc&limit=10&select=source,summary,importance',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
-      var wPick = null;
-      for (var wi=0; wi<(wHeld||[]).length; wi++) {
-        var ws = (wHeld[wi].summary||'');
-        if (ws.indexOf('superseded') === -1 && ws.indexOf('RELEASED BY WARDEN') === -1) { wPick = wHeld[wi]; break; }
-      }
-      if (wPick) {
-        await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(wPick.source),{method:'PATCH',
-          headers:Object.assign({},bh(),{'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'}),
-          body:JSON.stringify({stamp_type:'TASK',summary:'[RELEASED BY WARDEN '+new Date().toISOString().slice(0,10)+' -- pipeline re-proven by '+wProof[0].source.slice(0,50)+'] '+(wPick.summary||'').slice(0,400)})
-        }).catch(function(){});
-        await stamp({summary:'[WARDEN] released '+wPick.source+' back to the queue -- pipeline proven by a real-sha DONE newer than its hold', type:'WARDEN_RELEASE', released:wPick.source, proof:wProof[0].source});
-        r.checks.warden={released:wPick.source};
-      } else { r.checks.warden={released:null}; }
-    }
-  } catch(eW) { r.checks.warden={error:String(eW.message||eW).slice(0,80)}; }
-
   r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0);
   // MEETING MINUTES (research-backed: Anthropic Dreaming / Steinberger self-awareness)
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
