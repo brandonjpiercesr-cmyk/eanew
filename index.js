@@ -300,6 +300,34 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
   } catch(rosErr) { r.checks.rosError = rosErr.message; }
+  // ⬡B:eanew.warden:WIRE:held_task_release_station:20260702⬡
+  // THE WARDEN -- the role the founder named on 20260702: releasing shelved work
+  // is the caretaker's job, not the keyholder's. Deterministic rule: when the
+  // newest TASK_DONE carrying a real commit sha is YOUNGER than a TASK_HELD's
+  // last give-up, the pipeline has been re-proven since that task was shelved,
+  // so the hold no longer stands. One release per cycle, gradual and safe, and
+  // every release reports up as a WARDEN bead -- nothing happens silently.
+  try {
+    var wProof = await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_DONE&content=like.*%22sha%22*&order=created_at.desc&limit=1&select=created_at,source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+    if (wProof && wProof[0] && wProof[0].created_at) {
+      var proofTime = wProof[0].created_at;
+      var wHeld = await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_HELD&created_at=lt.'+encodeURIComponent(proofTime)+'&order=importance.desc,created_at.asc&limit=10&select=source,summary,importance',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var wPick = null;
+      for (var wi=0; wi<(wHeld||[]).length; wi++) {
+        var ws = (wHeld[wi].summary||'');
+        if (ws.indexOf('superseded') === -1 && ws.indexOf('RELEASED BY WARDEN') === -1) { wPick = wHeld[wi]; break; }
+      }
+      if (wPick) {
+        await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(wPick.source),{method:'PATCH',
+          headers:Object.assign({},bh(),{'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'}),
+          body:JSON.stringify({stamp_type:'TASK',summary:'[RELEASED BY WARDEN '+new Date().toISOString().slice(0,10)+' -- pipeline re-proven by '+wProof[0].source.slice(0,50)+'] '+(wPick.summary||'').slice(0,400)})
+        }).catch(function(){});
+        await stamp({summary:'[WARDEN] released '+wPick.source+' back to the queue -- pipeline proven by a real-sha DONE newer than its hold', type:'WARDEN_RELEASE', released:wPick.source, proof:wProof[0].source});
+        r.checks.warden={released:wPick.source};
+      } else { r.checks.warden={released:null}; }
+    }
+  } catch(eW) { r.checks.warden={error:String(eW.message||eW).slice(0,80)}; }
+
   r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0);
   // MEETING MINUTES (research-backed: Anthropic Dreaming / Steinberger self-awareness)
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
