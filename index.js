@@ -30,6 +30,12 @@ async function stamp(payload){
 // One cycle at a time, period.
 async function cycle(){
   if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
+  global._eanewCycleRunning = true;
+  // CLAIR fix 20260701b: flag is set BEFORE the awaited lock call below. Four MINUTES
+  // stamps landed in one second on a single cold-started instance -- two cycles 82ms
+  // apart both slipped through while the first was still awaiting the lock fetch,
+  // because the flag was only set after the await returned. In-process reentrancy is
+  // the flag's job; cross-instance is the RPC's job. Both layers, correct order.
   // CLAIR fix 20260701, second layer: the in-memory flag above only guards ONE
   // process. Duplicate MINUTES pairs with identical timestamps were still landing
   // with it in place -- Render runs multiple container instances, each with its own
@@ -42,10 +48,9 @@ async function cycle(){
         headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},
         body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
       var got = await lockR.json();
-      if (got !== true) { return { skipped: 'another_instance_holds_lock' }; }
+      if (got !== true) { global._eanewCycleRunning = false; return { skipped: 'another_instance_holds_lock' }; }
     } catch(lockE) {}
   }
-  global._eanewCycleRunning = true;
   try { return await cycleInner(); }
   finally { global._eanewCycleRunning = false; }
 }
@@ -264,15 +269,10 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
   // Rolling memory: load last 3 MINUTES beads at start of next cycle.
   var minutesContent='Cycle at '+r.ts+'. Checked AIR: '+(r.checks&&r.checks.air?JSON.stringify(r.checks.air):'{}')+'. Tasks: '+(r.checks&&r.checks.tasks?JSON.stringify(r.checks.tasks):'{}')+'. Health: '+(r.checks&&r.checks.health?JSON.stringify(r.checks.health):'{}');
-  if(BU&&BK){
-    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'MINUTES',
-        acl_stamp:'\u2b21B:eanew.minutes:MINUTES:cycle:'+Date.now()+'\u2b21',
-        source:'eanew.minutes.'+Date.now(),importance:6,
-        summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
-    }).catch(function(){});
-  }
+  // CLAIR fix 20260701b: retired the SECOND MINUTES writer. runofshow.stampMinutes()
+  // (her first-person voice) already stamps every cycle -- two writers per cycle read
+  // as duplicates in the brain and doubled storage for identical information.
+  // One writer now. r.summary still returned in the cycle response below.
   // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
   // The caretaker checks her own services each cycle. If one crashed, she reads
   // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
