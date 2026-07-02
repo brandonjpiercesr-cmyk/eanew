@@ -95,6 +95,30 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         ? 'TARGET FILE: '+targetFile+dynamicFCW+depAllowlist+'\n\nSPEC:\n'+innerSpec
         : innerSpec;
 
+      // ⬡B:eanew.cycle:WIRE:verdict_feedback_on_retry:20260702⬡
+      // Watched live 20260702: the same task failed the same gate three times in a
+      // row (identical CANON gap every try), because a retry never hears why the
+      // last attempt died. The verdict lands in a GIVE_UP_TRY bead and the next
+      // dispatch reads none of it. The gate can only teach if she hears it.
+      // Wiring only: read the newest try-counter bead for this task; if a prior
+      // verdict exists, ride it at the top of the dispatched task text so the next
+      // attempt fixes the named problem first. No LLM, no new dependencies, and it
+      // runs unchanged for any HAM's task.
+      try{
+        var fbSrc='eanew.giveup.'+task.source;
+        var fbRows=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(fbSrc)+'&select=content&order=created_at.desc&limit=1',
+          {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+          .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+        if(fbRows&&fbRows[0]&&fbRows[0].content){
+          var fb=null; try{ fb=JSON.parse(fbRows[0].content); }catch(ePf){ fb=null; }
+          if(fb&&fb.lastVerdict){
+            taskForCanew='=== LAST GATE VERDICT ON THIS EXACT TASK (fix this named problem FIRST, then the spec) ===\n'
+              +String(fb.lastVerdict)
+              +'\n=== END LAST VERDICT ===\n\n'+taskForCanew;
+          }
+        }
+      }catch(eFb){ /* non-fatal: dispatch proceeds without feedback */ }
+
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
