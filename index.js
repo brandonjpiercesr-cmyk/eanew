@@ -23,6 +23,18 @@ async function stamp(payload){
   }).catch(function(){});
 }
 async function cycle(){
+  if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
+  global._eanewCycleRunning = true;
+  if (BU && BK) {
+    try {
+      var lockR = await fetch(BU+'/rest/v1/rpc/try_acquire_cycle_lock',{method:'POST',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
+      var gotLock = await lockR.json();
+      if (gotLock !== true) { global._eanewCycleRunning = false; return { skipped: 'another_instance_holds_lock' }; }
+    } catch(le) {}
+  }
+  try { return await _cycleBody(); } finally { global._eanewCycleRunning = false; }
+}
+async function _cycleBody(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
@@ -249,15 +261,9 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
   // Rolling memory: load last 3 MINUTES beads at start of next cycle.
   var minutesContent='Cycle at '+r.ts+'. Checked AIR: '+(r.checks&&r.checks.air?JSON.stringify(r.checks.air):'{}')+'. Tasks: '+(r.checks&&r.checks.tasks?JSON.stringify(r.checks.tasks):'{}')+'. Health: '+(r.checks&&r.checks.health?JSON.stringify(r.checks.health):'{}');
-  if(BU&&BK){
-    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'MINUTES',
-        acl_stamp:'\u2b21B:eanew.minutes:MINUTES:cycle:'+Date.now()+'\u2b21',
-        source:'eanew.minutes.'+Date.now(),importance:6,
-        summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
-    }).catch(function(){});
-  }
+  // CLAIR single-writer, re-applied 20260702: retired the SECOND MINUTES writer.
+  // runofshow.stampMinutes() writes the first-person one every cycle; two writers
+  // per cycle = duplicate beads + doubled storage. One writer.
   // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
   // The caretaker checks her own services each cycle. If one crashed, she reads
   // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
@@ -359,6 +365,18 @@ async function consultStations(question){
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
+  // Station 6: ADVISOR pulse — advisor cycles stamp CONTRIBUTION beads (agent_global
+  // =ADVISOR). Closes the station -> Overseer -> A'NU chain for advisor work. EBC
+  // firewall: surface THAT advisor work happened and which world, never client content.
+  try{
+    if(BU&&BK){
+      var adv=await fetch(BU+"/rest/v1/aibe_brain?agent_global=eq.ADVISOR&stamp_type=eq.CONTRIBUTION&order=created_at.desc&limit=5&select=summary,created_at",{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      if(adv&&adv.length){
+        var fresh=adv.filter(function(a){return (Date.now()-new Date(a.created_at).getTime())<25*60*60*1000;});
+        if(fresh.length) stations.push('ADVISORS: '+fresh.length+' recent cycle(s), latest '+((fresh[0].summary||'').replace('[ADVISOR] ','').slice(0,50)||'reviewed'));
+      }
+    }
+  }catch(e){}
   return stations.join(' | ')+' ['+Math.round(Date.now()-start)+'ms]';
 }
 app.post('/eanew/ask',async function(req,res){
@@ -425,6 +443,9 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\*\*(.*?)\*\*/g,'$1');
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.get('/lockstatus',async function(req,res){
+  try{ var lr=await fetch(BU+'/rest/v1/eanew_cycle_lock',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'public'}}); var lock=await lr.json(); res.json({ok:true,fingerprint:'20260702-distlock-v4-remerged',lock:lock&&lock[0]}); }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
