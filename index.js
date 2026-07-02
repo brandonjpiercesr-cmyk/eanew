@@ -23,6 +23,18 @@ async function stamp(payload){
   }).catch(function(){});
 }
 async function cycle(){
+  if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
+  global._eanewCycleRunning = true;
+  if (BU && BK) {
+    try {
+      var lockR = await fetch(BU+'/rest/v1/rpc/try_acquire_cycle_lock',{method:'POST',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
+      var gotLock = await lockR.json();
+      if (gotLock !== true) { global._eanewCycleRunning = false; return { skipped: 'another_instance_holds_lock' }; }
+    } catch(le) {}
+  }
+  try { return await _cycleBody(); } finally { global._eanewCycleRunning = false; }
+}
+async function _cycleBody(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
@@ -212,15 +224,9 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
   // Rolling memory: load last 3 MINUTES beads at start of next cycle.
   var minutesContent='Cycle at '+r.ts+'. Checked AIR: '+(r.checks&&r.checks.air?JSON.stringify(r.checks.air):'{}')+'. Tasks: '+(r.checks&&r.checks.tasks?JSON.stringify(r.checks.tasks):'{}')+'. Health: '+(r.checks&&r.checks.health?JSON.stringify(r.checks.health):'{}');
-  if(BU&&BK){
-    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'MINUTES',
-        acl_stamp:'\u2b21B:eanew.minutes:MINUTES:cycle:'+Date.now()+'\u2b21',
-        source:'eanew.minutes.'+Date.now(),importance:6,
-        summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
-    }).catch(function(){});
-  }
+  // CLAIR fix 20260701b (re-applied after parallel-session merge): retired the SECOND
+  // MINUTES writer. runofshow.stampMinutes() (first-person voice) stamps every cycle;
+  // two writers per cycle read as duplicates and doubled storage. One writer now.
   // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
   // The caretaker checks her own services each cycle. If one crashed, she reads
   // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
@@ -388,6 +394,9 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\*\*(.*?)\*\*/g,'$1');
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.get('/lockstatus',async function(req,res){
+  try{ var lr=await fetch(BU+'/rest/v1/eanew_cycle_lock',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'public'}}); var lock=await lr.json(); res.json({ok:true,fingerprint:'20260701-distlock-v3-merged',lock:lock&&lock[0]}); }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
