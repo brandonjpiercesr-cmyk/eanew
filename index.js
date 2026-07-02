@@ -98,7 +98,27 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
-      if(buildResp&&buildResp.ok){drained=1;global._eanewNullCycles=0;
+      // ⬡B:eanew.cycle:FIX:done_requires_real_commit:20260702⬡
+      // W7 done definition, enforced: a SHA alone is not done, but NO sha is
+      // definitely not done. Live incident: CLAIR_CENTER and JOURNAL_SEED got
+      // TASK_DONE beads with sessionOk:true while their files never landed in
+      // the repo (sha null) -- the queue believed work existed that does not.
+      // DONE now requires buildResp.sha. An ok session without a commit stamps
+      // TASK_INCOMPLETE instead, keeping the task pending and the record honest.
+      if(buildResp&&buildResp.ok&&!buildResp.sha){
+        try{
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
+              source:task.source+'.INCOMPLETE.'+Date.now(),
+              acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260702\u2b21',
+              summary:'[TASK_INCOMPLETE] '+task.source+' -- session ok but NO commit sha; not done by W7. Path claimed: '+(buildResp.path||'unknown'),
+              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:null}),
+              importance:6})
+          }).catch(function(){});
+        }catch(eInc){}
+      }
+      if(buildResp&&buildResp.ok&&buildResp.sha){drained=1;global._eanewNullCycles=0;
         // ⬡B:eanew.cycle:FIX:task_done_stamp:20260702⬡
         // The other half of the done-contract, missing since the beginning:
         // nothing ever stamped TASK_DONE, so span's matcher had nothing exact
@@ -112,8 +132,8 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_DONE',
               source:task.source+'.DONE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_DONE:'+(task.label||'task')+':20260702\u2b21',
-              summary:'[TASK_DONE] '+task.source+' -- built ok by PAI, path: '+(buildResp.path||'unknown'),
-              content:JSON.stringify({task:task.source,path:buildResp.path||null,sessionOk:true}),
+              summary:'[TASK_DONE] '+task.source+' -- built and COMMITTED by PAI, path: '+(buildResp.path||'unknown')+' sha: '+String(buildResp.sha).slice(0,10),
+              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha}),
               importance:7})
           }).catch(function(){});
         }catch(eDone){}
