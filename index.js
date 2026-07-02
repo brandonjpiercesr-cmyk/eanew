@@ -64,13 +64,20 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
       var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
       var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
+      // ⬡B:eanew.cycle:WIRE:one_repo_everywhere:20260702⬡
+      // Bit live 20260702: dispatch honored task.repo while the context read and
+      // the commit verify were pinned to one repo. A build landed in the repo the
+      // dispatch named, the verify looked in a different one, stamped a phantom
+      // alert that was false, and the record split. One variable, used everywhere
+      // this leg names a repo, so context, dispatch, and verify always agree.
+      var repoUsed=(task.repo&&String(task.repo))||'canew';
       // DYNAMIC FCW: read the current target file from GitHub before dispatching
       // This is what makes CANEW build real code instead of scaffold
       // Without this, she builds from training patterns and hallucinates the interface
       var dynamicFCW='';
       if(targetFile && process.env.GITHUB_TOKEN){
         try{
-          var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+targetFile;
+          var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+targetFile;
           var ghResp=await fetch(ghUrl,{headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
           if(ghResp&&ghResp.content){
             var existingFile=Buffer.from(ghResp.content,'base64').toString('utf8');
@@ -83,7 +90,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       // Also fetch package.json dep list as the allowlist
       var depAllowlist='';
       try{
-        var pkgResp=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/package.json',
+        var pkgResp=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/package.json',
           {headers:{Authorization:'Bearer '+(process.env.GITHUB_TOKEN||''),'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
         if(pkgResp&&pkgResp.content){
           var pkg=JSON.parse(Buffer.from(pkgResp.content,'base64').toString('utf8'));
@@ -120,7 +127,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       }catch(eFb){ /* non-fatal: dispatch proceeds without feedback */ }
 
       var buildResp=await fetch(CANEW+'/canew/build',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
+        body:JSON.stringify({task:taskForCanew,targetFile:targetFile||undefined,repo:repoUsed,hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
       // ⬡B:eanew.cycle:FIX:done_requires_real_commit:20260702⬡
       // W7 done definition, enforced: a SHA alone is not done, but NO sha is
@@ -204,7 +211,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var verifiedBuild=false; var builtPath=buildResp&&buildResp.path;
       if(buildResp&&buildResp.ok&&builtPath&&process.env.GITHUB_TOKEN){
         try{
-          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+builtPath,
+          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+builtPath,
             {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
           if(vr.ok){ verifiedBuild=true; }
           else{ await stamp({summary:'[EANEW ALERT] phantom commit: '+builtPath+' not found on GitHub after build claimed ok',type:'PHANTOM'}); }
