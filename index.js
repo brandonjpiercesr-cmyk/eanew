@@ -23,18 +23,6 @@ async function stamp(payload){
   }).catch(function(){});
 }
 async function cycle(){
-  if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
-  global._eanewCycleRunning = true;
-  if (BU && BK) {
-    try {
-      var lockR = await fetch(BU+'/rest/v1/rpc/try_acquire_cycle_lock',{method:'POST',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
-      var gotLock = await lockR.json();
-      if (gotLock !== true) { global._eanewCycleRunning = false; return { skipped: 'another_instance_holds_lock' }; }
-    } catch(le) {}
-  }
-  try { return await _cycleBody(); } finally { global._eanewCycleRunning = false; }
-}
-async function _cycleBody(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
@@ -117,6 +105,43 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
               importance:7})
           }).catch(function(){});
         }catch(eDone){}
+      }
+      // ⬡B:eanew.cycle:FIX:give_up_guard:20260702⬡
+      // Observed live 20260702: PAI held on agents/lina/lina.test.js for 30+
+      // consecutive 3-minute cycles, same CANON clause every time, because the
+      // cycle had no memory of a hold -- a not-ok build did nothing, so the same
+      // top task was re-picked forever, burning the token on a build that cannot
+      // pass as specified. Founder's give_up_guard doctrine: after several tries
+      // in a row, set it aside, mark it for him, move on. Count lives in the
+      // brain (GIVE_UP_TRY beads keyed to this task source) so a restart can't
+      // reset it to zero. This runs unchanged for any HAM's task.
+      if(!(buildResp&&buildResp.ok)){
+        try{
+          var GIVE_UP_AT=3;
+          var trySrc='eanew.giveup.'+task.source;
+          var priorTries=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(trySrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+            .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+          var n=1;
+          if(priorTries&&priorTries[0]){ try{ n=(JSON.parse(priorTries[0].content).tries||0)+1; }catch(e){ n=1; } }
+          // Supersede the try-counter (terminal-state UPDATE style: newest wins on read)
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
+              source:trySrc,
+              acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260702\u2b21',
+              summary:'[GIVE_UP_TRY '+n+'/'+GIVE_UP_AT+'] '+task.source,
+              content:JSON.stringify({task:task.source,tries:n,lastVerdict:(buildResp&&buildResp.verdict)||'not_ok'}),importance:4})
+          }).catch(function(){});
+          if(n>=GIVE_UP_AT){
+            // Set the task aside so the queue advances. PATCH to TASK_HELD --
+            // terminal state via update, never a DELETE on a BEAD.
+            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+               body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
+            await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+n+' failed builds (last: '+((buildResp&&buildResp.verdict)||'not_ok')+'). Needs Brandon or a respec.',type:'GIVE_UP'});
+          }
+        }catch(eGuard){ /* non-fatal */ }
       }
       // OUTCOME VERIFY (research-backed: Anthropic Outcomes pattern)
       // Confirm the commit actually landed before claiming success or reaching out.
@@ -224,9 +249,15 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
   // Rolling memory: load last 3 MINUTES beads at start of next cycle.
   var minutesContent='Cycle at '+r.ts+'. Checked AIR: '+(r.checks&&r.checks.air?JSON.stringify(r.checks.air):'{}')+'. Tasks: '+(r.checks&&r.checks.tasks?JSON.stringify(r.checks.tasks):'{}')+'. Health: '+(r.checks&&r.checks.health?JSON.stringify(r.checks.health):'{}');
-  // CLAIR fix 20260701b (re-applied after parallel-session merge): retired the SECOND
-  // MINUTES writer. runofshow.stampMinutes() (first-person voice) stamps every cycle;
-  // two writers per cycle read as duplicates and doubled storage. One writer now.
+  if(BU&&BK){
+    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'MINUTES',
+        acl_stamp:'\u2b21B:eanew.minutes:MINUTES:cycle:'+Date.now()+'\u2b21',
+        source:'eanew.minutes.'+Date.now(),importance:6,
+        summary:'[EANEW MINUTES] '+r.summary,content:minutesContent})
+    }).catch(function(){});
+  }
   // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
   // The caretaker checks her own services each cycle. If one crashed, she reads
   // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
@@ -328,21 +359,6 @@ async function consultStations(question){
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
-  // Station 6: ADVISOR pulse — the EBC advisor cycles (bdif, gmg, mediators, mh_action)
-  // stamp CONTRIBUTION beads under agent_global=ADVISOR. Overseer never read them, so
-  // she could not surface "GMG had 8 new advisor emails" to Brandon on her own. This
-  // closes the station -> Overseer -> A'NU chain for advisor work. Doctrine: she reports
-  // that advisor activity happened; the EBC firewall keeps client CONTENT in its own
-  // world, so she surfaces the pulse (which world, how much), never cross-client detail.
-  try{
-    if(BU&&BK){
-      var adv=await fetch(BU+"/rest/v1/aibe_brain?agent_global=eq.ADVISOR&stamp_type=eq.CONTRIBUTION&order=created_at.desc&limit=5&select=summary,created_at,ham_uid",{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
-      if(adv&&adv.length){
-        var fresh=adv.filter(function(a){return (Date.now()-new Date(a.created_at).getTime())<25*60*60*1000;});
-        if(fresh.length) stations.push('ADVISORS: '+fresh.length+' recent cycle(s), latest '+((fresh[0].summary||'').replace('[ADVISOR] ','').slice(0,50)||'reviewed'));
-      }
-    }
-  }catch(e){}
   return stations.join(' | ')+' ['+Math.round(Date.now()-start)+'ms]';
 }
 app.post('/eanew/ask',async function(req,res){
@@ -409,9 +425,6 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\*\*(.*?)\*\*/g,'$1');
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
-});
-app.get('/lockstatus',async function(req,res){
-  try{ var lr=await fetch(BU+'/rest/v1/eanew_cycle_lock',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'public'}}); var lock=await lr.json(); res.json({ok:true,fingerprint:'20260701-distlock-v3-merged',lock:lock&&lock[0]}); }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
