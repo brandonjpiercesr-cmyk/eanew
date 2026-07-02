@@ -164,8 +164,12 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_DONE',
               source:task.source+'.DONE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_DONE:'+(task.label||'task')+':20260702\u2b21',
-              summary:'[TASK_DONE] '+task.source+' -- built and COMMITTED by PAI, path: '+(buildResp.path||'unknown')+' sha: '+String(buildResp.sha).slice(0,10),
-              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha}),
+              summary:'[TASK_DONE] '+task.source+' -- built and COMMITTED by PAI, path: '+(buildResp.path||'unknown')+' sha: '+String(buildResp.sha).slice(0,10)+(buildResp.wired===false?' [UNWIRED -- orphan flag + cleanup task queued by CANEW]':''),
+              // ⬡B:eanew.cycle:FIX:wired_field_carried_honest:20260702⬡
+              // Founder correction: 'built but never wired' can't be hidden inside a
+              // bare sha. wired now rides the DONE record itself so the Warden (and
+              // anyone reading this bead later) sees the real state, not an inferred one.
+              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha,wired:buildResp.wired!==false}),
               importance:7})
           }).catch(function(){});
         }catch(eDone){}
