@@ -328,7 +328,20 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // Only reach on meaningful files — not game console, not anew.self, not test files
       var BORING_FILES=['anew.self','game.console','game-console','canew','test.verify'];
       var isInteresting=builtPath&&!BORING_FILES.some(function(x){return (builtPath||'').indexOf(x)>=0;});
-      if(verifiedBuild&&builtPath&&reachCooldownOk&&isInteresting){
+      // ⬡B:eanew.cycle:FIX:retire_redundant_build_narration_reach:20260703⬡
+      // Founder finding, live tonight, real screenshots: this fired on routine
+      // wiring commits (most of them, all night) and the prompt itself asked
+      // for exactly the commit-message-style output he called pointless --
+      // "tell Brandon specifically what it does, what feature it enables" IS
+      // a request for code narration, by design, not a bug in execution.
+      // core/outreach.js on aibebase already does this job properly: real
+      // signal-based judgment, an actual importance threshold, and it was
+      // fixed tonight to specifically exclude build/RESULT chatter from
+      // reaching him. Two competing "should I text Brandon" paths with two
+      // different quality bars is worse than one good one. Retired here,
+      // verified-build detection and phantom-commit alerting above this
+      // block are untouched and still real.
+      if(false&&verifiedBuild&&builtPath&&reachCooldownOk&&isInteresting){
         try{
           global._lastAutoReachMs=Date.now();
           await fetch(BODY_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
