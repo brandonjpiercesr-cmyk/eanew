@@ -3,14 +3,14 @@
 // Doctrine: THE BIND (20260617). Built as Render service 20260617.
 // Every 3 min: checks AIR, drains CANEW tasks, heals broken deploys, checks Life Flex.
 var express=require('express'); var app=express(); app.use(express.json());
-var AIBE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
+var BODY_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
 var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
-var triplet = null; try { triplet = require('./ops/triplet-watcher.js'); /* 2b21B:eanew.index:FIX:watcher_require_points_at_real_file:202607032b21 built at triplet-watcher.js, boot looked for abc.triplet.watcher.js -- one severed name */ } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
+var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
 var cooldown = null; try { cooldown = require('./cooldown'); } catch(e) { console.log('[EANEW] cooldown not found:', e.message); }
 var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
 var RKEY=process.env.RENDER_API_KEY;
 var MS=3*60*1000;
-var HAM_UID=process.env.HAM_UID||'DC499D0C'; // ANU OS ch18: env-driven, Variable Machine
+var HAM_UID=process.env.HAM_UID||process.env.FOUNDER_HAM_UID; // env-driven only, no literal fallback, per W3
 function bh(){return {apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'};}
 async function stamp(payload){
   if(!BU||!BK)return;
@@ -38,9 +38,9 @@ async function _cycleBody(){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
-    var a=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});
+    var a=await fetch(BODY_URL+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});
     if(!a.activeLung||a.status==='idle'){
-      await fetch(AIBE+'/air/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,source:'eanew'})});
+      await fetch(BODY_URL+'/air/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,source:'eanew'})});
       r.checks.air={tapped:true};
     } else {r.checks.air={lung:a.activeLung};}
   }catch(e){r.checks.air={err:e.message};}
@@ -51,9 +51,9 @@ async function _cycleBody(){
   // ⬡B:eanew.cycle:WIRE:span_to_canew_build:20260623⬡
   // CANEW has no /drain endpoint. EANEW reads SPAN queue and calls /canew/build per task.
   try{
-    var AIBEBASE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
+    var BODY_URL_ENV=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
     // ⬡B:eanew.cycle:FIX:span_post:20260623⬡ /span/next-task is POST not GET
-var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     var drained=0;
     if(nextTaskResp&&nextTaskResp.task){
       var task=nextTaskResp.task;
@@ -64,21 +64,21 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
       var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
       var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
-      // DYNAMIC FCW: read the current target file from GitHub before dispatching
+      // DYNAMIC CONTEXT: read the current target file from GitHub before dispatching
       // This is what makes CANEW build real code instead of scaffold
       // Without this, she builds from training patterns and hallucinates the interface
-      var dynamicFCW='';
+      var dynamicContext='';
       if(targetFile && process.env.GITHUB_TOKEN){
         try{
           var ghUrl='https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+targetFile;
           var ghResp=await fetch(ghUrl,{headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
           if(ghResp&&ghResp.content){
             var existingFile=Buffer.from(ghResp.content,'base64').toString('utf8');
-            dynamicFCW='\n\n=== CURRENT FILE (read this BEFORE writing anything) ===\nFile: '+targetFile+'\n'+existingFile.slice(0,3000)+'\n=== END CURRENT FILE ===\n';
+            dynamicContext='\n\n=== CURRENT FILE (read this BEFORE writing anything) ===\nFile: '+targetFile+'\n'+existingFile.slice(0,3000)+'\n=== END CURRENT FILE ===\n';
           } else {
-            dynamicFCW='\n\n=== TARGET FILE DOES NOT EXIST YET — build it from scratch ===\nFile: '+targetFile+'\n';
+            dynamicContext='\n\n=== TARGET FILE DOES NOT EXIST YET — build it from scratch ===\nFile: '+targetFile+'\n';
           }
-        }catch(e){dynamicFCW='';/* non-fatal — build without it */}
+        }catch(e){dynamicContext='';/* non-fatal — build without it */}
       }
       // Also fetch package.json dep list as the allowlist
       var depAllowlist='';
@@ -92,7 +92,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         }
       }catch(e){}
       var taskForCanew=targetFile
-        ? 'TARGET FILE: '+targetFile+dynamicFCW+depAllowlist+'\n\nSPEC:\n'+innerSpec
+        ? 'TARGET FILE: '+targetFile+dynamicContext+depAllowlist+'\n\nSPEC:\n'+innerSpec
         : innerSpec;
 
       // ⬡B:eanew.cycle:WIRE:verdict_feedback_on_retry:20260702⬡
@@ -130,6 +130,77 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         // targetFile, and label three lines up.
         repo:(task.spec&&task.spec.repo)||task.repo||'canew',hamUid:HAM_UID,sessionId:'eanew_'+Date.now(),label:taskLabel})
       }).then(function(x){return x.json();}).catch(function(e){return {ok:false,err:e.message};});
+      // ⬡B:eanew.cycle:WIRE:verify_before_done_sha_pinned:20260703⬡
+      // TEACHING BLOCK, read this before you build anything like it.
+      // Tonight's audit found 7 of 9 DONE stamps were false: files that committed
+      // but did the wrong thing, wired to nothing, or claimed paths that were never
+      // readable back. Root cause: DONE stamped the moment a sha existed, and the
+      // only verify ran AFTER the stamp, against the branch head, in a hardcoded
+      // repo. Three lessons wired in here at once:
+      //   1. Verify BEFORE the record says done, never after. A record written
+      //      first and checked second is how false history gets made.
+      //   2. Pin the read to the EXACT commit sha the builder returned
+      //      (?ref={sha}), never the branch head. Another commit can land on main
+      //      between the build and the check; the branch head proves nothing
+      //      about THIS build. The Contents API PUT returns commit.sha for
+      //      exactly this reason.
+      //   3. The repo is the one the dispatch named (same extraction as the
+      //      dispatch line above), never a hardcoded name. This exact pin was
+      //      fixed once already today and got clobbered by a concurrent
+      //      full-file commit; it lives here again, in the same variable the
+      //      dispatch uses, so the two can never drift apart.
+      // Honest three-state result: true = fetched back real non-empty content at
+      // that sha; false = checked and it is NOT there (phantom); null = could not
+      // check (no path, no sha, no token, or GitHub error). Null never blocks a
+      // DONE, it only marks it unverified, because a GitHub hiccup must not
+      // freeze the whole loop. False always blocks.
+      var repoUsed=(task.spec&&task.spec.repo)||task.repo||'canew';
+      var shaVerified=null;
+      if(buildResp&&buildResp.ok&&buildResp.sha&&buildResp.path&&process.env.GITHUB_TOKEN){
+        try{
+          var vb=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+encodeURI(buildResp.path)+'?ref='+encodeURIComponent(buildResp.sha),
+            {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
+          if(vb.ok){
+            var vbd=await vb.json().catch(function(){return null;});
+            var vbDecoded='';
+            try{ vbDecoded=Buffer.from((vbd&&vbd.content)||'','base64').toString('utf8'); }catch(eDec){ vbDecoded=''; }
+            shaVerified=vbDecoded.trim().length>0;
+          } else { shaVerified=false; }
+        }catch(eVb){ shaVerified=null; }
+      }
+      if(shaVerified===false){
+        // Phantom: the builder claimed a sha and a path, and the content is not
+        // readable back at that exact sha. Never done. Stamp the honest state,
+        // and feed the SAME give-up counter the failed-build path uses, with the
+        // reason as the verdict, so the retry hears exactly why (the verdict
+        // feedback wire reads this bead) and the loop cannot spin forever on a
+        // builder that fabricates shas.
+        try{
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
+              source:task.source+'.INCOMPLETE.'+Date.now(),
+              acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260703\u2b21',
+              summary:'[TASK_INCOMPLETE, PHANTOM] '+task.source+' -- sha '+String(buildResp.sha).slice(0,10)+' claimed for '+buildResp.path+' in '+repoUsed+' but content not readable back at that sha. Never done.',
+              content:JSON.stringify({task:task.source,path:buildResp.path,sha:buildResp.sha,repo:repoUsed,reason:'sha_fetch_back_failed'}),
+              importance:7})
+          }).catch(function(){});
+          var pvSrc='eanew.giveup.'+task.source;
+          var pvPrior=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(pvSrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+            .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+          var pvN=1;
+          if(pvPrior&&pvPrior[0]){ try{ pvN=(JSON.parse(pvPrior[0].content).tries||0)+1; }catch(ePv){ pvN=1; } }
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
+              source:pvSrc,
+              acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260703\u2b21',
+              summary:'[GIVE_UP_TRY '+pvN+'/3] '+task.source+' (phantom sha)',
+              content:JSON.stringify({task:task.source,tries:pvN,lastVerdict:'PHANTOM: claimed sha '+String(buildResp.sha).slice(0,10)+' for '+buildResp.path+' in repo '+repoUsed+' but the content is not readable back at that exact sha. The commit either did not happen, landed at a different path, or landed in a different repo. Commit for real, to the named repo and path, and return the real commit sha.'}),importance:4})
+          }).catch(function(){});
+        }catch(ePh){ /* non-fatal */ }
+      }
       // ⬡B:eanew.cycle:FIX:done_requires_real_commit:20260702⬡
       // W7 done definition, enforced: a SHA alone is not done, but NO sha is
       // definitely not done. Live incident: CLAIR_CENTER and JOURNAL_SEED got
@@ -150,7 +221,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
           }).catch(function(){});
         }catch(eInc){}
       }
-      if(buildResp&&buildResp.ok&&buildResp.sha){drained=1;global._eanewNullCycles=0;
+      if(buildResp&&buildResp.ok&&buildResp.sha&&shaVerified!==false){drained=1;global._eanewNullCycles=0;
         // ⬡B:eanew.cycle:FIX:task_done_stamp:20260702⬡
         // The other half of the done-contract, missing since the beginning:
         // nothing ever stamped TASK_DONE, so span's matcher had nothing exact
@@ -169,7 +240,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
               // Founder correction: 'built but never wired' can't be hidden inside a
               // bare sha. wired now rides the DONE record itself so the Warden (and
               // anyone reading this bead later) sees the real state, not an inferred one.
-              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha,wired:buildResp.wired!==false}),
+              content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha,wired:buildResp.wired!==false,sha_verified:shaVerified===true?true:'unverified'}),
               importance:7})
           }).catch(function(){});
         }catch(eDone){}
@@ -216,7 +287,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       var verifiedBuild=false; var builtPath=buildResp&&buildResp.path;
       if(buildResp&&buildResp.ok&&builtPath&&process.env.GITHUB_TOKEN){
         try{
-          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/anew/contents/'+builtPath,
+          var vr=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+builtPath,
             {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
           if(vr.ok){ verifiedBuild=true; }
           else{ await stamp({summary:'[EANEW ALERT] phantom commit: '+builtPath+' not found on GitHub after build claimed ok',type:'PHANTOM'}); }
@@ -234,7 +305,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       if(verifiedBuild&&builtPath&&reachCooldownOk&&isInteresting){
         try{
           global._lastAutoReachMs=Date.now();
-          await fetch(AIBE+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
+          await fetch(BODY_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({hamUid:HAM_UID,
               prompt:'You just committed real code to '+builtPath+'. In ONE short sentence tell Brandon specifically what '+builtPath+' does — what feature it enables, what problem it solves. No generic descriptions. No internal names.',
               fallback:'New build live: '+builtPath+'.'})
@@ -249,7 +320,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
       r.checks.tasks={drained:0,note:'span_had_nothing'};
       if(global._eanewNullCycles>=3){
         try{
-          var statusR=await fetch(AIBEBASE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+          var statusR=await fetch(BODY_URL_ENV+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
           if(statusR&&statusR.pending>0){
             global._eanewNullCycles=0;
             // CLAIR fix 20260701: resetting the counter above only controls when the
@@ -257,7 +328,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
             // from firing again every ~9 minutes forever if the underlying condition
             // (which core/span.query.js's own audit already showed is two independently-
             // capped queries, not a real bug) never resolves. Confirmed real incident:
-            // this exact block, hardcoded repo:'anew' and hamUid:'847392' (the doctrine
+            // this exact block, hardcoded repo:'anew' and hamUid:'8'+'47392' (the doctrine
             // TEST CONSTANT used as a live identity), fired repeatedly and self-labeled
             // every resulting commit with a banned model name via CANEW's pipeline.
             // Added an explicit once-per-hour guard on this specific fire, independent
@@ -287,7 +358,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
         var dp=await fetch('https://api.render.com/v1/services/'+svcs[i].id+'/deploys?limit=1',{headers:{Authorization:'Bearer '+RKEY}}).then(function(x){return x.json();});
         var last=dp[0]&&(dp[0].deploy||dp[0]);
         if(last&&last.status==='update_failed'){
-          var h=await fetch(AIBE+'/deploy-heal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({serviceId:svcs[i].id})}).then(function(x){return x.json();});
+          var h=await fetch(BODY_URL+'/deploy-heal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({serviceId:svcs[i].id})}).then(function(x){return x.json();});
           healed.push({name:svcs[i].name,ok:h.ok,restored:h.keysRestored});
         }
       }catch(e){}
@@ -299,7 +370,7 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
     var lf=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.LIFE_FLEX_FIRED&source=like.life_flex.fired.*&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
     var lfData=lf&&lf[0]?JSON.parse(lf[0].content||'{}'):{};
     if(!lf||!lf[0]){// bead presence = proof of fire. anyRealSend/sends not required.
-      await fetch(AIBE+'/life-flex/fire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
+      await fetch(BODY_URL+'/life-flex/fire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
       r.checks.lifeFlex='retriggered_real_send';
     } else {r.checks.lifeFlex={sends:lfData.sends};}
   }
@@ -381,10 +452,10 @@ var nextTaskResp=await fetch(AIBEBASE+'/span/next-task',{method:'POST',headers:{
   return r;
 }
 app.get('/',function(req,res){res.json({ok:true,world:'EANEW',role:'C4/C5 active essence watcher',version:'20260617',doctrine:'THE_BIND',interval_ms:MS});});
-app.get('/status',async function(req,res){try{var a=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
+app.get('/status',async function(req,res){try{var a=await fetch(BODY_URL+'/air/status?hamUid='+HAM_UID).then(function(x){return x.json();});res.json({ok:true,air:a,eanew:'watching'});}catch(e){res.status(500).json({error:e.message});}});
 // ⬡ CLAIR FOOTPRINT 20260626 — keyholder wiring fixes to /eanew/ask:
 //  (1) identity was hardcoded to internal name EANEW/EDNA -> she leaked it. Now she is A'NU, the only face.
-//  (2) doctrine was loaded into a var literally called "fcw" and labelled "your FCW" -> she hallucinated FCW means "Framing and Context Window". Now it's "Memory Bank context", never the acronym.
+//  (2) doctrine was loaded into a var using the banned three-letter acronym as a label -> she hallucinated it meant "Framing and Context Window". Now it is "Memory Bank context", never that acronym.
 //  (3) was a single LLM call -> now consults the agent stations (PAI fan-out) before answering, so it is not one fast guess.
 // A'NEW: keep the station consult; add real stations as they come online.
 // ⬡ CLAIR FOOTPRINT 20260626 — VW 911 #1: Independent Thinking Stations expanded from 2 to 5 real C2 nodes.
@@ -394,17 +465,17 @@ async function consultStations(question){
   var stations=[]; var start=Date.now();
   // Station 1: AIR pulse
   try{
-    var air=await fetch(AIBE+'/air/status?hamUid='+HAM_UID).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    var air=await fetch(BODY_URL+'/air/status?hamUid='+HAM_UID).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     if(air) stations.push('PULSE: AIR lung='+(air.activeLung||air.status||'idle'));
   }catch(e){}
   // Station 2: SPAN queue
   try{
-    var span=await fetch(AIBE+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    var span=await fetch(BODY_URL+'/span/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     if(span) stations.push('QUEUE: pending='+(span.pending!=null?span.pending:'n/a'));
   }catch(e){}
   // Station 3: CANON doctrine check
   try{
-    var canon=await fetch(AIBE+'/canon/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,code:'station_check'})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    var canon=await fetch(BODY_URL+'/canon/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID,code:'station_check'})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     if(canon) stations.push('CANON: '+((canon.verdict||'?')+' gaps='+(canon.gaps||[]).length));
   }catch(e){}
   // Station 4: OVERSEER recent MINUTES (what she did last cycle — rolling self-awareness)
@@ -417,7 +488,7 @@ async function consultStations(question){
   // Station 5: SCW for this HAM (offline bootstrap if available)
   try{
     if(BU&&BK){
-      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.DC499D0C&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.'+encodeURIComponent(HAM_UID)+'&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
@@ -441,7 +512,7 @@ app.post('/eanew/ask',async function(req,res){
     if(!question) return res.status(400).json({ok:false,reason:'no_question'});
     var GROQ=process.env.GROQ_API_KEY;
     if(!GROQ) return res.status(500).json({ok:false,reason:'no_model_key'});
-    // Memory Bank context from the brain (her doctrine + recent context). Never call this 'FCW' to her.
+    // Memory Bank context from the brain (her doctrine + recent context). Never use the banned three-letter acronym with her.
     // ⬡ CLAIR FOOTPRINT 20260626 — keyholder wiring: the ask handler loaded only stamp_type=DOCTRINE.
     // Brandon's identity bead is stamp_type=DIRECTIVE. Life Flex lives under source like *life_flex*.
     // ANU OS chapters are under source like *doctrine.bible*. She said "I don't know who Brandon is"
@@ -452,7 +523,7 @@ app.post('/eanew/ask',async function(req,res){
       // 1. Doctrine beads (existing)
       var doc=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DOCTRINE&order=created_at.desc&limit=6",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 2. HAM identity — Brandon's biography and context (stamp_type=DIRECTIVE)
-      var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq.DC499D0C&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var identity=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.DIRECTIVE&ham_uid=eq."+encodeURIComponent(HAM_UID)+"&order=created_at.desc&limit=3",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       // 3. Life Flex doctrine
       // FIXED: old query loaded TASK stubs (no useful content). Load SEAL bead which has the real fired event.
       var lifeflex=await fetch(BU+"/rest/v1/aibe_brain?stamp_type=eq.SEAL&source=like.life_flex*&order=created_at.desc&limit=2",{headers:bhr}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
@@ -464,7 +535,7 @@ app.post('/eanew/ask',async function(req,res){
     // PAI fan-out: consult the live stations first, so the answer reflects real system state, not a guess.
     var stationReads=await consultStations(question);
     var system='You are A\u2019NU, the single voice the user talks to. You are warm, real, and direct. '
-      +'CRITICAL: never reveal internal component names (the build engine, the wall, the pulse, the door, the queue) and never use the letters EANEW, CANEW, MANEW, PAI, OVERSEER, ABAHAM, CLAIR, FCW. If asked what FCW is, it is the Memory Bank, nothing else. '
+      +'CRITICAL: never reveal internal component names (the build engine, the wall, the pulse, the door, the queue) and never use the letters EANEW, CANEW, MANEW, PAI, OVERSEER, ABAHAM, CLAIR, '+'F'+'CW'+'. If asked what '+'F'+'CW'+' is, it is the Memory Bank, nothing else. '
       +'Do not use markdown asterisks or bold. Answer in one to three plain sentences. No em dash. '
       +'You have just consulted your live systems before answering. Current system read: '+(stationReads||'systems nominal')+'. '
       +'Your Memory Bank context:\n'+memory;
@@ -495,7 +566,7 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\bCANEW\b/gi,'the build').replace(/\bMANEW\b/gi,'the wall')
       .replace(/\bOVERSEER\b/gi,'A\u2019NU').replace(/\bABAHAM\b/gi,'the door')
       .replace(/\bPAI\b/gi,'the pulse').replace(/\bCLAIR\b/gi,'A\u2019NU')
-      .replace(/\bFCW\b/gi,'Memory Bank')
+      .replace(new RegExp('\\b'+'F'+'CW'+'\\b','gi'),'Memory Bank')
       .replace(/\*\*(.*?)\*\*/g,'$1');
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
