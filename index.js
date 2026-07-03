@@ -64,6 +64,32 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       if(typeof innerSpec==='object') innerSpec=JSON.stringify(innerSpec);
       var targetFile=(task.spec&&task.spec.targetFile)||task.targetFile||null;
       var taskLabel=(task.spec&&task.spec.label)||task.label||task.source||'';
+      // ⬡B:eanew.cycle:WIRE:collision_guard_before_dispatch:20260703⬡
+      // Real audit tonight (clair.audit.full_queue_1088.20260703): 435 of 742
+      // target-specified pending tasks were chasing a file some OTHER pending task
+      // already separately owned -- eanew/index.js itself had 26. That's how two
+      // sessions end up editing the same file blind, which is what broke
+      // routes/iman.routes.js four separate times in one night. This checks the
+      // brain for any OTHER task already TASK or TASK_HELD against the same
+      // targetFile before this one proceeds to dispatch; if found, this cycle
+      // holds instead and tries again next cycle. First attempt at this task
+      // (span.task.CARETAKER_COLLISION_GUARD.1783090049) required three modules
+      // that do not exist anywhere in this repo and assumed an event-emitter shape
+      // this cycle has never used -- fixed here, additive, inline, using the same
+      // real brain-query pattern already proven throughout tonight's build.
+      if (targetFile && BU && BK) {
+        try {
+          var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=in.(TASK,TASK_HELD)&content=ilike.*' +
+            encodeURIComponent(targetFile) + '*&select=source&limit=5';
+          var collideRows = await fetch(collideUrl, { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
+            .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
+          var otherOwner = (collideRows || []).find(function(row){ return row.source !== task.source; });
+          if (otherOwner) {
+            r.checks.collisionGuard = { held: true, targetFile: targetFile, ownedBy: otherOwner.source };
+            return r;
+          }
+        } catch (eCollide) { /* non-fatal — if the check itself fails, proceed as before rather than stall the cycle */ }
+      }
       // DYNAMIC CONTEXT: read the current target file from GitHub before dispatching
       // This is what makes CANEW build real code instead of scaffold
       // Without this, she builds from training patterns and hallucinates the interface
