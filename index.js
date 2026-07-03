@@ -5,7 +5,7 @@
 var express=require('express'); var app=express(); app.use(express.json());
 var AIBE=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
 var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
-var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
+var triplet = null; try { triplet = require('./ops/triplet-watcher.js'); /* 2b21B:eanew.index:FIX:watcher_require_points_at_real_file:202607032b21 built at triplet-watcher.js, boot looked for abc.triplet.watcher.js -- one severed name */ } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
 var cooldown = null; try { cooldown = require('./cooldown'); } catch(e) { console.log('[EANEW] cooldown not found:', e.message); }
 var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
 var RKEY=process.env.RENDER_API_KEY;
