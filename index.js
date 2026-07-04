@@ -520,8 +520,19 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   // FULL RUN OF SHOW (roadmap #4): real tool access + judgment
   try {
     var ros = require('./runofshow');
-    r.checks.iman = await ros.checkIman();
-    r.checks.wren = await ros.checkWren();
+    // ⬡B:eanew.cycle:WIRE:iman_wren_parallel_not_sequential:20260704⬡
+    // Real founder doctrine, sealed since a real conversation on the actual use
+    // case (not just coding): these two checks read from completely different
+    // channels (email queue, text queue) and neither one's result feeds the
+    // other's input. They were running one after another for no real reason --
+    // pure sequential cost with zero dependency to justify it. Promise.all runs
+    // both at once; the cycle finishes in however long the SLOWER of the two
+    // takes, not the sum of both. Same shape as the FCW resilience fix already
+    // proven live tonight (Promise.allSettled), applied here as Promise.all
+    // since a failure in either genuinely should surface, not be swallowed.
+    var parallelChecks = await Promise.all([ros.checkIman(), ros.checkWren()]);
+    r.checks.iman = parallelChecks[0];
+    r.checks.wren = parallelChecks[1];
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
