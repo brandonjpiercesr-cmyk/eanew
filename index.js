@@ -722,6 +722,26 @@ app.post('/eanew/ask',async function(req,res){
       .replace(/\bPAI\b/gi,'the pulse').replace(/\bCLAIR\b/gi,'A\u2019NU')
       .replace(new RegExp('\\b'+'F'+'CW'+'\\b','gi'),'Memory Bank')
       .replace(/\*\*(.*?)\*\*/g,'$1');
+    // ⬡B:eanew.ask:FIX:real_shadow_check:20260704⬡
+    // Live incident, proven tonight: asked what CLAIR had told her minutes
+    // earlier, she had no such record (this endpoint never writes to the
+    // brain, confirmed by reading the code) and invented a specific, wrong,
+    // plausible-sounding technical explanation, framed as "according to my
+    // Memory Bank." This endpoint had zero hallucination check on its own
+    // answer, unlike the real reply pipeline. core/council.js's shadow()
+    // already does this real check live elsewhere; eanew is a separate repo
+    // and service and cannot require it directly, so this calls the bridge
+    // route added on aibebase tonight instead of reinventing the check here.
+    // Fails open on any error, same posture as every other check in this
+    // system: a slow or unreachable check must never block a real answer.
+    try {
+      var shadowCheck = await fetch(BODY_URL+'/council/shadow-check',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({text:answer})})
+        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+      if (shadowCheck && shadowCheck.ok && shadowCheck.pass===false) {
+        answer = 'I want to be straight with you rather than guess. I don\'t have a solid answer on that right now, but I can look into it properly.';
+      }
+    } catch (eShadow) {}
     res.json({ok:true,model:'anu',answer:answer,stations:stationReads});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
