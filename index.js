@@ -86,7 +86,20 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           var otherOwner = (collideRows || []).find(function(row){ return row.source !== task.source; });
           if (otherOwner) {
             r.checks.collisionGuard = { held: true, targetFile: targetFile, ownedBy: otherOwner.source };
-            return r;
+            // ⬡B:eanew.cycle:FIX:collision_guard_scoped_skip:20260704⬡
+            // Live incident: this used to `return r` here, which exits the ENTIRE
+            // cycle function, not just this one dispatch. Two of CANEW's own
+            // auto-queued cleanup tasks (gap_cleanup + wiring_cleanup) landed on
+            // the same targetFile tonight, and since neither ever resolves, every
+            // cycle re-picked one of them, hit this guard, and silently threw away
+            // the health check, the advisor pass, and the self-report stamp below
+            // -- every single cycle, forever, with no error logged anywhere. Throw
+            // a marked signal instead: it unwinds out of the dispatch-only logic
+            // below (context fetch, build call, done/give-up stamping) through the
+            // existing catch at the bottom of this try block, and the rest of the
+            // cycle -- health, life flex, minutes -- runs exactly as it does on a
+            // normal empty-queue cycle.
+            throw { collisionGuardHeld: true, targetFile: targetFile, ownedBy: otherOwner.source };
           }
         } catch (eCollide) { /* non-fatal — if the check itself fails, proceed as before rather than stall the cycle */ }
       }
@@ -438,7 +451,10 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         }catch(e){ r.checks.tasks.circuit_err=e.message; }
       }
     }
-  }catch(e){r.checks.tasks={err:e.message};}
+  }catch(e){
+    if (e && e.collisionGuardHeld) { r.checks.tasks = { drained: 0, note: 'collision_guard_held', targetFile: e.targetFile, ownedBy: e.ownedBy }; }
+    else { r.checks.tasks = { err: (e && e.message) || String(e) }; }
+  }
   // 3. Service health
   if(RKEY){
     var svcs=[{id:'srv-d8lpvjcvikkc73bolec0',name:'aibebase'},{id:'srv-d7hu7u9f9bms73frs5d0',name:'ababase'},{id:'srv-d8ojn1pkh4rs738viseg',name:'canew'}];
