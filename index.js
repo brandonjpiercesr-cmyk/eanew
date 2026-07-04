@@ -533,6 +533,25 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     var parallelChecks = await Promise.all([ros.checkIman(), ros.checkWren()]);
     r.checks.iman = parallelChecks[0];
     r.checks.wren = parallelChecks[1];
+    // ⬡B:eanew.cycle:FIX:outreach_never_wired_into_real_cycle:20260704⬡
+    // Real, definitive root cause of a full day of silence, confirmed by reading
+    // the code: outreachPass (the real judgment -- importance gate, gap check,
+    // all of it already built and already proven when triggered by hand) was
+    // ONLY ever reachable through a manual HTTP button. It was never once
+    // called by this cycle, which itself has been alive the whole time (136
+    // real heartbeats today) and genuinely producing (580 real contributions
+    // today) -- the cycle just never gave outreach a turn. This is the same
+    // license as every other wiring fix tonight: an existing, already-working
+    // decision is finally getting called, no new threshold invented, no
+    // force flag, her own real judgment decides for itself every tick whether
+    // today is a day worth reaching out. Fails open (a slow or unreachable
+    // check must never block the rest of the cycle), same posture as
+    // everything else here.
+    try {
+      r.checks.outreach = await fetch(BODY_URL+'/outreach/check',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
+        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    } catch (eOutreach) { r.checks.outreach = null; }
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
