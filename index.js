@@ -32,7 +32,24 @@ async function cycle(){
       if (gotLock !== true) { global._eanewCycleRunning = false; return { skipped: 'another_instance_holds_lock' }; }
     } catch(le) {}
   }
-  try { return await _cycleBody(); } finally { global._eanewCycleRunning = false; }
+  // ⬡B:eanew.cycle:FIX:hard_cycle_timeout:20260704⬡
+  // Live incident: automatic cycling stopped completely for 6+ hours while
+  // this exact process kept answering HTTP requests fine the whole time,
+  // including a manual POST /cycle that completed cleanly in seconds. The
+  // only explanation that fits: some await inside _cycleBody hung forever on
+  // one bad tick, so global._eanewCycleRunning stayed true permanently, and
+  // every later setInterval tick silently no-op'd at cycle_overlap above,
+  // with nothing to log because it never got that far. core/find.js already
+  // carries this exact pattern for the same reason ("a slow brain can never
+  // hang the build," 2500ms hard timeout there); this is the same fix at the
+  // cycle's own top level, generous enough to never cut off real work.
+  var TIMEOUT_MS = 90000;
+  try {
+    return await Promise.race([
+      _cycleBody(),
+      new Promise(function(resolve){ setTimeout(function(){ resolve({ timedOut: true, summary: 'cycle exceeded ' + TIMEOUT_MS + 'ms, aborted to protect future ticks' }); }, TIMEOUT_MS); })
+    ]);
+  } finally { global._eanewCycleRunning = false; }
 }
 async function _cycleBody(){
   var r={ts:new Date().toISOString(),checks:{}};
