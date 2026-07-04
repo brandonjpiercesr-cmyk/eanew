@@ -180,7 +180,13 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // check (no path, no sha, no token, or GitHub error). Null never blocks a
       // DONE, it only marks it unverified, because a GitHub hiccup must not
       // freeze the whole loop. False always blocks.
-      var repoUsed=(task.spec&&task.spec.repo)||task.repo||'canew';
+      // ⬡B:eanew.cycle:FIX:verify_where_it_landed:20260704⬡
+      // Live incident (MERIT_DIRECTORY_5WS): the builder lawfully redirects
+      // mind-code paths (core/, routes/, agents/) into anew and reports the
+      // landing repo in its response; this judge kept reading the repo the TASK
+      // named and ruled a real commit phantom. The builder's report of where it
+      // landed outranks the dispatch's guess. Task repo stays as fallback only.
+      var repoUsed=(buildResp&&buildResp.repo)||(task.spec&&task.spec.repo)||task.repo||'canew';
       var shaVerified=null;
       if(buildResp&&buildResp.ok&&buildResp.sha&&buildResp.path&&process.env.GITHUB_TOKEN){
         try{
@@ -191,7 +197,25 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             var vbDecoded='';
             try{ vbDecoded=Buffer.from((vbd&&vbd.content)||'','base64').toString('utf8'); }catch(eDec){ vbDecoded=''; }
             shaVerified=vbDecoded.trim().length>0;
-          } else { shaVerified=false; }
+          } else {
+            // ⬡B:eanew.cycle:FIX:blob_sha_fallback:20260704⬡
+            // A landed sha recovered from a contents read is the file's BLOB
+            // sha, and ?ref= only accepts commit-ish refs, so the pinned read
+            // 404s on real commits. Fallback: read the file at main; verified
+            // ONLY if the blob sha at head equals the sha the builder returned,
+            // with real content -- still exact-object verification, just
+            // recognizing which kind of sha arrived. Anything else stays phantom.
+            try{
+              var vb2=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repoUsed+'/contents/'+encodeURI(buildResp.path)+'?ref=main',
+                {headers:{Authorization:'Bearer '+process.env.GITHUB_TOKEN,'Accept':'application/vnd.github+json','User-Agent':'eanew'}});
+              if(vb2.ok){
+                var vbd2=await vb2.json().catch(function(){return null;});
+                var dec2='';
+                try{ dec2=Buffer.from((vbd2&&vbd2.content)||'','base64').toString('utf8'); }catch(eD2){ dec2=''; }
+                shaVerified=!!(vbd2&&vbd2.sha===buildResp.sha&&dec2.trim().length>0);
+              } else { shaVerified=false; }
+            }catch(eF){ shaVerified=false; }
+          }
         }catch(eVb){ shaVerified=null; }
       }
       if(shaVerified===false){
