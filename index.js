@@ -249,6 +249,19 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               summary:'[GIVE_UP_TRY '+pvN+'/3] '+task.source+' (phantom sha)',
               content:JSON.stringify({task:task.source,tries:pvN,lastVerdict:'PHANTOM: claimed sha '+String(buildResp.sha).slice(0,10)+' for '+buildResp.path+' in repo '+repoUsed+' but the content is not readable back at that exact sha. The commit either did not happen, landed at a different path, or landed in a different repo. Commit for real, to the named repo and path, and return the real commit sha.'}),importance:4})
           }).catch(function(){});
+          // ⬡B:eanew.cycle:FIX:phantom_giveup_cap:20260704⬡
+          // Live incident: MERIT_DIRECTORY_5WS phantomed 5 times straight and
+          // this path never checked a cap, so it looped indefinitely -- it only
+          // stopped because try 6 happened to fail outright instead of
+          // phantoming, which runs the OTHER cap check below. A task that keeps
+          // phantoming without ever failing outright would never shelve. Same
+          // cap, same shelf action, same counter key, now enforced here too.
+          if(pvN>=3){
+            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+               body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
+            await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+pvN+' straight phantom commits. Needs Brandon or a respec.',type:'GIVE_UP'});
+          }
         }catch(ePh){ /* non-fatal */ }
       }
       // ⬡B:eanew.cycle:FIX:done_requires_real_commit:20260702⬡
