@@ -78,6 +78,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // this cycle has never used -- fixed here, additive, inline, using the same
       // real brain-query pattern already proven throughout tonight's build.
       if (targetFile && BU && BK) {
+        var collisionHeld = false;
         try {
           var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=in.(TASK,TASK_HELD)&content=ilike.*' +
             encodeURIComponent(targetFile) + '*&select=source&limit=5';
@@ -86,22 +87,24 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           var otherOwner = (collideRows || []).find(function(row){ return row.source !== task.source; });
           if (otherOwner) {
             r.checks.collisionGuard = { held: true, targetFile: targetFile, ownedBy: otherOwner.source };
-            // ⬡B:eanew.cycle:FIX:collision_guard_scoped_skip:20260704⬡
-            // Live incident: this used to `return r` here, which exits the ENTIRE
-            // cycle function, not just this one dispatch. Two of CANEW's own
-            // auto-queued cleanup tasks (gap_cleanup + wiring_cleanup) landed on
-            // the same targetFile tonight, and since neither ever resolves, every
-            // cycle re-picked one of them, hit this guard, and silently threw away
-            // the health check, the advisor pass, and the self-report stamp below
-            // -- every single cycle, forever, with no error logged anywhere. Throw
-            // a marked signal instead: it unwinds out of the dispatch-only logic
-            // below (context fetch, build call, done/give-up stamping) through the
-            // existing catch at the bottom of this try block, and the rest of the
-            // cycle -- health, life flex, minutes -- runs exactly as it does on a
-            // normal empty-queue cycle.
-            throw { collisionGuardHeld: true, targetFile: targetFile, ownedBy: otherOwner.source };
+            collisionHeld = { collisionGuardHeld: true, targetFile: targetFile, ownedBy: otherOwner.source };
           }
         } catch (eCollide) { /* non-fatal — if the check itself fails, proceed as before rather than stall the cycle */ }
+        // ⬡B:eanew.cycle:FIX:collision_guard_scoped_skip:20260704⬡
+        // Live incident, two parts. Part 1: this block used to `return r` on a
+        // collision, exiting the ENTIRE cycle function -- two of CANEW's own
+        // auto-queued cleanup tasks (gap_cleanup + wiring_cleanup) landed on the
+        // same targetFile, neither ever resolved, and every cycle since silently
+        // threw away the health check, advisor pass, and self-report stamp below,
+        // forever, no error anywhere. Part 2, found testing the first fix: moving
+        // the escape to a throw INSIDE the try above just fed it straight into
+        // that try's own catch(eCollide), which swallows it as "check failed,
+        // proceed anyway" -- so the guard silently stopped guarding, dispatching
+        // the colliding file regardless. The throw has to happen after that inner
+        // try/catch has already closed, so it reaches the real catch at the
+        // bottom of this whole task block instead -- skips only this dispatch,
+        // still runs health/life-flex/minutes exactly like an empty-queue cycle.
+        if (collisionHeld) { throw collisionHeld; }
       }
       // DYNAMIC CONTEXT: read the current target file from GitHub before dispatching
       // This is what makes CANEW build real code instead of scaffold
