@@ -306,6 +306,20 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               content:JSON.stringify({task:task.source,path:buildResp.path||null,sha:buildResp.sha,wired:buildResp.wired!==false,sha_verified:shaVerified===true?true:'unverified'}),
               importance:7})
           }).catch(function(){});
+          // ⬡B:eanew.cycle:FIX:patch_original_row_done:20260704⬡
+          // Live incident: 1,149 TASK rows accumulated, un-patched, because only
+          // the paired *.DONE.timestamp bead above was ever written. span.query.js
+          // already defines a completed row patched to stamp_type=TASK_DONE as a
+          // valid, first-checked done condition (v11 contract) -- nothing ever
+          // executed that half. Every finished task's own row stayed stamp_type=
+          // TASK forever, permanently occupying the dispatcher's top-200-by-
+          // importance query window and burying every real pending task with
+          // lower importance below the cutoff, invisible to /span/next-task no
+          // matter how many cycles ran. Same PATCH pattern already used for
+          // TASK_HELD below -- terminal-state UPDATE, never a DELETE on a BEAD.
+          await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+            {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+             body:JSON.stringify({stamp_type:'TASK_DONE'})}).catch(function(){});
         }catch(eDone){}
       }
       // ⬡B:eanew.cycle:FIX:give_up_guard:20260702⬡
