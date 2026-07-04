@@ -137,6 +137,23 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         ? 'TARGET FILE: '+targetFile+dynamicContext+depAllowlist+'\n\nSPEC:\n'+innerSpec
         : innerSpec;
 
+      // ⬡B:eanew.cycle:WIRE:clair_static_context_window:20260704⬡
+      // span.task.CLAIR_STATIC_CONTEXT_WINDOW. Built the aggregation route
+      // (routes/clair.context.routes.js) then found the actual gap: nothing
+      // ever called it before dispatch, so PAI still built blind to what
+      // CLAIR already knows, exactly the "two different pictures" problem the
+      // task named. Wired here, for real: her recent works/wiring/supersede
+      // stamps ride at the very top of the dispatched task text, above even
+      // the retry-verdict feedback below. Non-fatal on failure, a slow or
+      // empty brief never blocks a build.
+      try{
+        var ccResp=await fetch(BODY_URL_ENV+'/clair/context/brief?limit=8').then(function(x){return x.json();}).catch(function(){return null;});
+        if(ccResp&&ccResp.ok&&ccResp.brief){
+          taskForCanew='=== CLAIR\'S CONTEXT WINDOW (what she already knows about this build) ===\n'
+            +ccResp.brief+'\n=== END CLAIR CONTEXT ===\n\n'+taskForCanew;
+        }
+      }catch(eCC){ /* non-fatal */ }
+
       // ⬡B:eanew.cycle:WIRE:verdict_feedback_on_retry:20260702⬡
       // Watched live 20260702: the same task failed the same gate three times in a
       // row (identical CANON gap every try), because a retry never hears why the
