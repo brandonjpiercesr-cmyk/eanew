@@ -569,6 +569,19 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     } catch (eOutreach) { r.checks.outreach = null; }
     finally { clearTimeout(outreachTimeoutId); }
+    // ⬡B:eanew.cycle:WIRE:daily_digest_wired_same_pattern:20260705⬡
+    // Same shape as the outreach check right above: its own short timeout so
+    // it can never be the thing that drags a cycle past the 90s safety line,
+    // fails open, called every tick -- checkDailyDigest gates itself to once
+    // per real day, so this is a no-op most ticks.
+    var digestController = new AbortController();
+    var digestTimeoutId = setTimeout(function(){ digestController.abort(); }, 12000);
+    try {
+      r.checks.digest = await fetch(BODY_URL+'/outreach/digest',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:digestController.signal})
+        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
+    } catch (eDigest) { r.checks.digest = null; }
+    finally { clearTimeout(digestTimeoutId); }
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
