@@ -547,6 +547,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     // today is a day worth reaching out. Fails open (a slow or unreachable
     // check must never block the rest of the cycle), same posture as
     // everything else here.
+    r.checks.outreachAttempted = true;
     try {
       r.checks.outreach = await fetch(BODY_URL+'/outreach/check',{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
