@@ -547,13 +547,28 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     // today is a day worth reaching out. Fails open (a slow or unreachable
     // check must never block the rest of the cycle), same posture as
     // everything else here.
-    console.log('[CLAIR_TRACE] reached outreach block, about to fetch ' + BODY_URL + '/outreach/check');
-    r.checks.outreachAttempted = true;
+    // ⬡B:eanew.cycle:FIX:outreach_own_timeout_not_shared_90s_budget:20260704⬡
+    // Real, confirmed root cause of an intermittent (not deterministic) gap:
+    // proved directly that the outreach wiring itself works -- a manual /cycle
+    // call returned a full, real judgment. But the whole cycle sits inside a
+    // 90s hard safety timeout (the fix for an earlier stuck-cycle incident),
+    // and this call adds a real network hop to another service, which itself
+    // calls out for judgment. On a slow tick that pushes the total past 90s,
+    // the race resolves to the timeout first and this result never gets seen
+    // by that tick's caller, even though the background work keeps running
+    // and stamps late -- explaining why the same proven-correct code showed
+    // up sometimes and not others. Standalone this call has taken ~1s in
+    // every direct test tonight, so a 12s allowance is generous headroom
+    // while making sure it can never be the thing that drags a whole cycle
+    // past the safety line. Fails open exactly like every other check here.
+    var outreachController = new AbortController();
+    var outreachTimeoutId = setTimeout(function(){ outreachController.abort(); }, 12000);
     try {
       r.checks.outreach = await fetch(BODY_URL+'/outreach/check',{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:outreachController.signal})
         .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
     } catch (eOutreach) { r.checks.outreach = null; }
+    finally { clearTimeout(outreachTimeoutId); }
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
