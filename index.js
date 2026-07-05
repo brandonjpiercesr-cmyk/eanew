@@ -799,8 +799,33 @@ app.get('/lockstatus',async function(req,res){
 });
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
+// ⬡B:eanew.cycle:WIRE:surface_stuck_cycle_alert:20260705⬡
+// The 90s hard-timeout (20260704) stops a hung cycle from freezing the lock
+// forever, but its {timedOut:true} result was thrown away at the call site --
+// self-healing and invisible at the same time. A cycle that keeps timing out
+// every tick would silently burn 90s of every 3-minute window forever with
+// nobody told, the same class of silent failure as the original 6-hour
+// incident, just capped now instead of permanent. Stamp a real ALERT the
+// moment a timeout actually happens: command-center only, no outbound, same
+// convention core/pai/watchdog.js already uses.
+async function tickCycle(){
+  try {
+    var result = await cycle();
+    if (result && result.timedOut && BU && BK) {
+      await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+        headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+        body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',
+          acl_stamp:'⬡B:eanew.cycle.timeout:ALERT:surfaced:'+Date.now()+'⬡',stamp_type:'ALERT',
+          source:'eanew.cycle.timeout.'+Date.now(),
+          summary:'[CRITICAL] A PAI cycle hung past 90s and was force-aborted. Self-healed, lock released, but something inside the cycle is stalling and this will keep happening until it is found. Surfaced to command center only, no outbound.',
+          importance:10,
+          content:JSON.stringify({event:'cycle_timeout',timeoutMs:90000,cycleSummary:result.summary||null,timestamp:new Date().toISOString()})})
+      }).catch(function(){});
+    }
+  } catch(e) {}
+}
 app.listen(PORT,function(){
   console.log('[EANEW] C4/C5 active essence watcher alive on '+PORT+' -- THE BIND doctrine');
-  cycle();
-  setInterval(cycle,MS);
+  tickCycle();
+  setInterval(tickCycle,MS);
 });
