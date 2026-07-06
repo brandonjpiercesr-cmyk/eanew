@@ -561,27 +561,36 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     // every direct test tonight, so a 12s allowance is generous headroom
     // while making sure it can never be the thing that drags a whole cycle
     // past the safety line. Fails open exactly like every other check here.
+    // ⬡B:eanew.cycle:FIX:outreach_digest_timeout_never_updated_for_ornith:20260706⬡
+    // Real, live-confirmed regression, self-caused: these two calls now try
+    // Ornith first (tonight's own settled-ladder migration on judgeAndCompose
+    // and composeDigest), and Ornith genuinely takes 10-40+ real seconds, not
+    // the ~1s the old 12s budget was sized for. Result: a real importance-9
+    // security alert (admin.thelegacyinstitute@gmail.com) sat unreachable for
+    // 2.5+ hours -- the judgment was correct every time it was tried by hand
+    // with a real timeout, the autonomous cycle was just never giving it
+    // enough time to finish before aborting. Two real fixes: (1) run both in
+    // parallel, same pattern already proven on iman/wren earlier tonight, so
+    // the added time is the slower of the two, not the sum. (2) raise each
+    // to 45s, sized to tonight's real observed Ornith range, while parallel
+    // execution keeps the worst case at 45s total, not 90s, leaving real
+    // room in the cycle's own 90s hard cap for everything else. Still fails
+    // open exactly as before if either genuinely can't finish in time.
     var outreachController = new AbortController();
-    var outreachTimeoutId = setTimeout(function(){ outreachController.abort(); }, 12000);
-    try {
-      r.checks.outreach = await fetch(BODY_URL+'/outreach/check',{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:outreachController.signal})
-        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
-    } catch (eOutreach) { r.checks.outreach = null; }
-    finally { clearTimeout(outreachTimeoutId); }
-    // ⬡B:eanew.cycle:WIRE:daily_digest_wired_same_pattern:20260705⬡
-    // Same shape as the outreach check right above: its own short timeout so
-    // it can never be the thing that drags a cycle past the 90s safety line,
-    // fails open, called every tick -- checkDailyDigest gates itself to once
-    // per real day, so this is a no-op most ticks.
+    var outreachTimeoutId = setTimeout(function(){ outreachController.abort(); }, 45000);
     var digestController = new AbortController();
-    var digestTimeoutId = setTimeout(function(){ digestController.abort(); }, 12000);
-    try {
-      r.checks.digest = await fetch(BODY_URL+'/outreach/digest',{method:'POST',
+    var digestTimeoutId = setTimeout(function(){ digestController.abort(); }, 45000);
+    var reachResults = await Promise.all([
+      fetch(BODY_URL+'/outreach/check',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:outreachController.signal})
+        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;}),
+      fetch(BODY_URL+'/outreach/digest',{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:digestController.signal})
-        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
-    } catch (eDigest) { r.checks.digest = null; }
-    finally { clearTimeout(digestTimeoutId); }
+        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;})
+    ]);
+    clearTimeout(outreachTimeoutId); clearTimeout(digestTimeoutId);
+    r.checks.outreach = reachResults[0];
+    r.checks.digest = reachResults[1];
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
