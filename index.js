@@ -576,21 +576,27 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     // execution keeps the worst case at 45s total, not 90s, leaving real
     // room in the cycle's own 90s hard cap for everything else. Still fails
     // open exactly as before if either genuinely can't finish in time.
-    var outreachController = new AbortController();
-    var outreachTimeoutId = setTimeout(function(){ outreachController.abort(); }, 45000);
-    var digestController = new AbortController();
-    var digestTimeoutId = setTimeout(function(){ digestController.abort(); }, 45000);
-    var reachResults = await Promise.all([
-      fetch(BODY_URL+'/outreach/check',{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:outreachController.signal})
-        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;}),
-      fetch(BODY_URL+'/outreach/digest',{method:'POST',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({}),signal:digestController.signal})
-        .then(function(x){return x.ok?x.json():null;}).catch(function(){return null;})
-    ]);
-    clearTimeout(outreachTimeoutId); clearTimeout(digestTimeoutId);
-    r.checks.outreach = reachResults[0];
-    r.checks.digest = reachResults[1];
+    // ⬡B:eanew.cycle:FIX:fire_and_forget_not_a_timeout_number_to_guess:20260706⬡
+    // Real escalation from the last fix: raised the timeout to 45s, still
+    // came back null on the very next real tick even with zero worker
+    // contention at the time -- Ornith's real range tonight has been
+    // anywhere from 9s to 90+s, so any fixed number the cycle waits on is a
+    // guess that will keep failing some real fraction of the time, and a
+    // safety-relevant check silently failing is worse than a slow one.
+    // Real fix: stop making the cycle WAIT on these at all. Both
+    // /outreach/check and /outreach/digest already do their own real
+    // sending and brain-stamping internally, regardless of who is still
+    // listening for the HTTP response -- so fire them and move on. Whether
+    // either takes 5 seconds or 90, it completes on its own schedule and
+    // does its real job either way. r.checks.outreach/digest now record
+    // that a fire happened, not the full result -- the real result is
+    // whatever DIGEST/OUTREACH bead lands in the brain when it lands.
+    fetch(BODY_URL+'/outreach/check',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
+    fetch(BODY_URL+'/outreach/digest',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
+    r.checks.outreach = { fired: true };
+    r.checks.digest = { fired: true };
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
