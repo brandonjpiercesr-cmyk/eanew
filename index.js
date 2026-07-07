@@ -607,11 +607,38 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   // posture as every other check in this cycle.
   if(BU&&BK){
     try{
+      var STATIONS=['EANEW','BDIF_ADVISOR','MEDIATORS_ADVISOR','GMG_ADVISOR','CANEW'];
+      // \u2b21B:eanew.reconciliation:FIX:loop_detection_added:20260707\u2b21
+      // Founder correction 20260707: staleness alone missed CANEW stuck on the
+      // same failing task for 12h+ because she was actively logging every
+      // ~3min the whole time, not silent -- silence and a stuck loop are
+      // different failure shapes. This runs EVERY cycle (not gated to once/
+      // 24h like the full reconciliation sweep below) because a stuck loop
+      // needs to be caught in minutes, not a day. Same summary text repeating
+      // 5+ times in a row for one station, no real progress, real alert.
+      var loopFlags=[];
+      for(var li=0;li<STATIONS.length;li++){
+        var recent=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        if(recent&&recent.length>=5){
+          var firstMsg=(recent[0].summary||'').slice(0,80);
+          var repeatCount=recent.filter(function(r){return (r.summary||'').slice(0,80)===firstMsg;}).length;
+          if(repeatCount>=5) loopFlags.push({station:STATIONS[li],repeatedSummary:firstMsg,repeatCount:repeatCount});
+        }
+      }
+      if(loopFlags.length>0){
+        await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+          body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
+            acl_stamp:'\u2b21B:eanew.reconciliation:ALERT:stuck_loop:'+Date.now()+'\u2b21',
+            source:'eanew.reconciliation.loop.'+Date.now(),
+            summary:'[STUCK LOOP] '+loopFlags.length+' station(s) repeating the same failure: '+loopFlags.map(function(s){return s.station;}).join(', '),
+            content:JSON.stringify({loopFlags:loopFlags}),importance:9})
+        }).catch(function(){});
+      }
       var lastRecon=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.RECONCILIATION&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var lastReconAt=lastRecon&&lastRecon[0]?new Date(lastRecon[0].created_at).getTime():0;
       var hoursSinceRecon=(Date.now()-lastReconAt)/3600000;
       if(hoursSinceRecon>=24){
-        var STATIONS=['EANEW','BDIF_ADVISOR','MEDIATORS_ADVISOR','GMG_ADVISOR'];
         var staleness=[];
         for(var si=0;si<STATIONS.length;si++){
           var st=STATIONS[si];
@@ -640,9 +667,9 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               content:JSON.stringify({allStations:staleness}),importance:5})
           }).catch(function(){});
         }
-        r.checks.reconciliation={ran:true,staleCount:stale.length};
+        r.checks.reconciliation={ran:true,staleCount:stale.length,loopFlags:loopFlags.length};
       } else {
-        r.checks.reconciliation={ran:false,hoursUntilNext:Math.round(24-hoursSinceRecon)};
+        r.checks.reconciliation={ran:false,hoursUntilNext:Math.round(24-hoursSinceRecon),loopFlags:loopFlags.length};
       }
     }catch(reconErr){r.checks.reconciliation={err:reconErr.message};}
   }
