@@ -601,7 +601,52 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
   } catch(rosErr) { r.checks.rosError = rosErr.message; }
-  r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0);
+  // 5. Station reconciliation -- span.task.nightly_station_reconciliation, founder-dispatched 20260706.
+  // Rides this same real cycle rather than a separate cron; self-gated to run the actual
+  // sweep roughly once/24h by checking for its own last-run bead first. Fails open, same
+  // posture as every other check in this cycle.
+  if(BU&&BK){
+    try{
+      var lastRecon=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.RECONCILIATION&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var lastReconAt=lastRecon&&lastRecon[0]?new Date(lastRecon[0].created_at).getTime():0;
+      var hoursSinceRecon=(Date.now()-lastReconAt)/3600000;
+      if(hoursSinceRecon>=24){
+        var STATIONS=['EANEW','BDIF_ADVISOR','MEDIATORS_ADVISOR','GMG_ADVISOR'];
+        var staleness=[];
+        for(var si=0;si<STATIONS.length;si++){
+          var st=STATIONS[si];
+          var lastRow=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(st)+'&order=created_at.desc&limit=1&select=created_at',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var lastAt=lastRow&&lastRow[0]?new Date(lastRow[0].created_at).getTime():0;
+          var hoursSince=lastAt?((Date.now()-lastAt)/3600000):null;
+          staleness.push({station:st,hoursSinceLastReport:hoursSince===null?null:Math.round(hoursSince)});
+        }
+        var stale=staleness.filter(function(s){return s.hoursSinceLastReport===null||s.hoursSinceLastReport>48;});
+        if(stale.length>0){
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
+              acl_stamp:'\u2b21B:eanew.reconciliation:ALERT:stale_station:'+Date.now()+'\u2b21',
+              source:'eanew.reconciliation.'+Date.now(),
+              summary:'[STATION RECONCILIATION] '+stale.length+' station(s) silent 48h+: '+stale.map(function(s){return s.station;}).join(', '),
+              content:JSON.stringify({allStations:staleness,staleStations:stale}),importance:8})
+          }).catch(function(){});
+        } else {
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'RECONCILIATION',
+              acl_stamp:'\u2b21B:eanew.reconciliation:RECONCILIATION:all_clear:'+Date.now()+'\u2b21',
+              source:'eanew.reconciliation.'+Date.now(),
+              summary:'[STATION RECONCILIATION] all '+STATIONS.length+' stations reporting within 48h',
+              content:JSON.stringify({allStations:staleness}),importance:5})
+          }).catch(function(){});
+        }
+        r.checks.reconciliation={ran:true,staleCount:stale.length};
+      } else {
+        r.checks.reconciliation={ran:false,hoursUntilNext:Math.round(24-hoursSinceRecon)};
+      }
+    }catch(reconErr){r.checks.reconciliation={err:reconErr.message};}
+  }
+  r.summary='air:'+(r.checks.air.lung||r.checks.air.tapped)+' tasks:'+(r.checks.tasks.drained||0)+' healed:'+(r.checks.health&&r.checks.health.healed?r.checks.health.healed.length:0)+' recon:'+(r.checks.reconciliation&&r.checks.reconciliation.ran?('stale='+r.checks.reconciliation.staleCount):'waiting');
   // MEETING MINUTES (research-backed: Anthropic Dreaming / Steinberger self-awareness)
   // Stamp first-person deliberation so the next cycle knows what this cycle did.
   // Rolling memory: load last 3 MINUTES beads at start of next cycle.
