@@ -628,7 +628,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         if(rc.fired) continue;
         if(!rc.due_at||new Date(rc.due_at).getTime()>Date.now()) continue;
         try{
-          var alreadyFired=await fetch(BU+'/rest/v1/aibe_brain?source=ilike.eanew.reminder.fired.'+rem.id+'.*&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var alreadyFired=await fetch(BU+'/rest/v1/aibe_brain?source=ilike.eanew.reminder.fired.'+rem.id+'.%25&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
           if(alreadyFired&&alreadyFired.length) continue;
         }catch(eCheck){continue;}
         try{
