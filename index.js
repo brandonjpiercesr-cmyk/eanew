@@ -608,6 +608,18 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   // repeat. Command Center shows the ones not due yet separately.
   if(BU&&BK){
     try{
+      // ⬡B:eanew.reminders:FIX:same_reminder_refiring_every_cycle:20260707⬡
+      // Real, live, severe incident: firing wrote a NEW confirmation bead
+      // but never updated the ORIGINAL reminder row, so the next cycle's
+      // query re-fetched the same still-unfired-looking row and fired it
+      // again -- every ~3 minutes, all day, confirmed live on the founder's
+      // real phone. Same class of bug as the earlier NOW-contributor
+      // re-fire fix tonight, different function. Fix, matching this brain's
+      // real append-only convention: before firing, check whether a real
+      // 'eanew.reminder.fired.<id>.' bead already exists for this exact
+      // reminder id; if it does, this reminder already fired, skip it. No
+      // schema change, no update-in-place needed, just a real check against
+      // what the log already contains.
       var dueReminders=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.REMINDER&order=created_at.desc&limit=30&select=id,ham_uid,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var AIBEBASE_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
       for(var ri=0;ri<(dueReminders||[]).length;ri++){
@@ -615,6 +627,10 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         var rc=rem.content; try{rc=JSON.parse(rc);}catch(e){rc={};}
         if(rc.fired) continue;
         if(!rc.due_at||new Date(rc.due_at).getTime()>Date.now()) continue;
+        try{
+          var alreadyFired=await fetch(BU+'/rest/v1/aibe_brain?source=ilike.eanew.reminder.fired.'+rem.id+'.*&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          if(alreadyFired&&alreadyFired.length) continue;
+        }catch(eCheck){continue;}
         try{
           await fetch(AIBEBASE_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({hamUid:rem.ham_uid,prompt:'Remind them, in your own words: '+rc.text})});
