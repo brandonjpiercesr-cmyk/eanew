@@ -601,6 +601,35 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
   } catch(rosErr) { r.checks.rosError = rosErr.message; }
+  // ⬡B:eanew.reminders:BUILD:reminder_feature:20260707⬡
+  // span.task.reminder_feature_command_center. Rides this same real cycle.
+  // Real reminders due now fire for real through POST /reach/out on aibebase
+  // (her own compose-and-send path), then get marked fired so they never
+  // repeat. Command Center shows the ones not due yet separately.
+  if(BU&&BK){
+    try{
+      var dueReminders=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.REMINDER&order=created_at.desc&limit=30&select=id,ham_uid,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var AIBEBASE_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
+      for(var ri=0;ri<(dueReminders||[]).length;ri++){
+        var rem=dueReminders[ri];
+        var rc=rem.content; try{rc=JSON.parse(rc);}catch(e){rc={};}
+        if(rc.fired) continue;
+        if(!rc.due_at||new Date(rc.due_at).getTime()>Date.now()) continue;
+        try{
+          await fetch(AIBEBASE_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({hamUid:rem.ham_uid,prompt:'Remind them, in your own words: '+rc.text})});
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+            body:JSON.stringify({ham_uid:rem.ham_uid,agent_global:'PAI',stamp_type:'REMINDER',
+              acl_stamp:'\u2b21B:eanew.reminders:REMINDER:fired:'+Date.now()+'\u2b21',
+              source:'eanew.reminder.fired.'+rem.id+'.'+Date.now(),
+              summary:'[REMINDER FIRED] '+String(rc.text||'').slice(0,100),
+              content:JSON.stringify(Object.assign({},rc,{fired:true,firedAt:new Date().toISOString()})),importance:5})
+          }).catch(function(){});
+        }catch(eFire){}
+      }
+    }catch(remErr){}
+  }
   // 5. Station reconciliation -- span.task.nightly_station_reconciliation, founder-dispatched 20260706.
   // Rides this same real cycle rather than a separate cron; self-gated to run the actual
   // sweep roughly once/24h by checking for its own last-run bead first. Fails open, same
