@@ -646,6 +646,46 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       }
     }catch(remErr){}
   }
+  // ⬡B:eanew.selfreview:BUILD:periodic_coding_self_review:20260707⬡
+  // span.task.periodic_coding_self_review. Rides this same real cycle,
+  // self-gated to ~4h. Looks at real usage friction -- silent turns
+  // (cycle_end_silent) and no-tool diagnostic turns already stamped by
+  // core/tool.loop.js -- and PROPOSES a fix as a real span.task for the
+  // coding department to plan, never commits anything itself. Founder's own
+  // words: permission to propose, not to commit directly.
+  if(BU&&BK){
+    try{
+      var lastSelfReview=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SELF_REVIEW&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var lastSRAt=lastSelfReview&&lastSelfReview[0]?new Date(lastSelfReview[0].created_at).getTime():0;
+      var hoursSinceSR=(Date.now()-lastSRAt)/3600000;
+      if(hoursSinceSR>=4){
+        var sinceIsoSR=new Date(Date.now()-4*3600000).toISOString();
+        var silentTurns=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.CYCLE_STEP&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&summary=ilike.*cycle_end_silent*&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var noToolTurns=await fetch(BU+'/rest/v1/aibe_brain?source=like.clair.diagnostic.no_tool_turn*&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var frictionCount=(silentTurns?silentTurns.length:0)+(noToolTurns?noToolTurns.length:0);
+        if(frictionCount>=3){
+          var proposalName='span.task.self_review_friction_'+Date.now();
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK',
+              acl_stamp:'\u2b21B:eanew.selfreview:TASK:proposed:'+Date.now()+'\u2b21',
+              source:proposalName,
+              summary:'[FOR PAI -- self-review proposal, not committed] '+frictionCount+' friction signals in the last 4h: '+((silentTurns?silentTurns.length:0))+' silent turns, '+((noToolTurns?noToolTurns.length:0))+' no-tool turns. Review and plan a real fix.',
+              content:JSON.stringify({silentCount:silentTurns?silentTurns.length:0,noToolCount:noToolTurns?noToolTurns.length:0,windowHours:4,proposedNotCommitted:true}),
+              importance:6})
+          }).catch(function(){});
+        }
+        await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+          body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'SELF_REVIEW',
+            acl_stamp:'\u2b21B:eanew.selfreview:SELF_REVIEW:ran:'+Date.now()+'\u2b21',
+            source:'eanew.selfreview.'+Date.now(),
+            summary:'[SELF REVIEW] '+frictionCount+' friction signals in last 4h'+(frictionCount>=3?', proposal filed':', below threshold'),
+            content:JSON.stringify({silentCount:silentTurns?silentTurns.length:0,noToolCount:noToolTurns?noToolTurns.length:0}),importance:4})
+        }).catch(function(){});
+      }
+    }catch(srErr){}
+  }
   // 5. Station reconciliation -- span.task.nightly_station_reconciliation, founder-dispatched 20260706.
   // Rides this same real cycle rather than a separate cron; self-gated to run the actual
   // sweep roughly once/24h by checking for its own last-run bead first. Fails open, same
