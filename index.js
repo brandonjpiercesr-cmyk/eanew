@@ -683,6 +683,32 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             summary:'[SELF REVIEW] '+frictionCount+' friction signals in last 4h'+(frictionCount>=3?', proposal filed':', below threshold'),
             content:JSON.stringify({silentCount:silentTurns?silentTurns.length:0,noToolCount:noToolTurns?noToolTurns.length:0}),importance:4})
         }).catch(function(){});
+        // \u2b21B:eanew.wiringdebt:BUILD:visible_backlog_report:20260708\u2b21
+        // Founder-named disease, overnight: things get built, weeks pass, nothing
+        // ever calls them, nobody notices until a manual read-through catches it.
+        // The detection (CANEW's own orphan flag, span.task.wiring_cleanup) was
+        // already real and correct -- 161 real open tasks confirmed the night this
+        // was built. What never existed was visibility: the backlog just grew,
+        // silently, inside the same queue as everything else. This makes the real
+        // count impossible to miss instead of easy to lose.
+        try {
+          var allWiring=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var doneWiring=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_DONE&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var doneSet={};
+          (doneWiring||[]).forEach(function(d){doneSet[d.source]=true;});
+          var openWiring=(allWiring||[]).filter(function(w){return !doneSet[w.source];});
+          if(openWiring.length>0){
+            await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+              headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+              body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'DRAFT_PENDING',
+                acl_stamp:'\u2b21B:eanew.wiringdebt:DRAFT_PENDING:backlog_report:'+Date.now()+'\u2b21',
+                source:'eanew.wiringdebt.'+Date.now(),
+                summary:'[WIRING DEBT] '+openWiring.length+' real files built but never called by anything, still open. Review /admin/legacy-kill or the real files named in each task.',
+                content:JSON.stringify({status:'pending_approval',openCount:openWiring.length,sample:openWiring.slice(0,10).map(function(w){return w.source;}),createdAt:new Date().toISOString()}),
+                importance:openWiring.length>50?9:6})
+            }).catch(function(){});
+          }
+        } catch(wdErr){}
       }
     }catch(srErr){}
   }
