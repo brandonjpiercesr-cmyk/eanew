@@ -969,6 +969,65 @@ app.post('/eanew/ask',async function(req,res){
 app.get('/lockstatus',async function(req,res){
   try{ var lr=await fetch(BU+'/rest/v1/eanew_cycle_lock',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'public'}}); var lock=await lr.json(); res.json({ok:true,fingerprint:'20260702-distlock-v4-remerged',lock:lock&&lock[0]}); }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
+// ⬡B:eanew.audit:BUILD:reach_storm_self_audit:20260708⬡
+// Real capability, founder-commissioned directly: "does my girl know how to
+// fix this in the future... if not, make her better than you." Tonight's
+// entire multi-hour investigation into a real reach storm depended on
+// things Overseer never had access to before now: reading code across every
+// real repo, checking every real Render service's live/suspended status,
+// and querying Twilio's own authoritative call log. This is that same
+// method, packaged as a real, callable capability -- read-only, diagnostic
+// only. Deliberately does NOT deploy or write code changes autonomously;
+// that is a real, separate trust decision the founder should make present,
+// not something bootstrapped unsupervised overnight. It produces a real,
+// structured report and stamps it to the brain for a real chat to act on.
+var REACH_CREDENTIALED_SERVICES=[
+  {id:'srv-d678jup4tr6s7396kki0',name:'aba-reach'},
+  {id:'srv-d67kfb7gi27c739uupe0',name:'abacia'},
+  {id:'srv-d7hu892qqhas738ovdt0',name:'incuaba'}
+];
+async function auditReachStorm(){
+  var report={ranAt:new Date().toISOString(),twilioCalls:[],services:[],note:''};
+  try{
+    var tSid=process.env.TWILIO_ACCOUNT_SID, tTok=process.env.TWILIO_AUTH_TOKEN;
+    var founderPhone=process.env.FOUNDER_PHONE||'+13363898116';
+    if(tSid&&tTok){
+      var auth=Buffer.from(tSid+':'+tTok).toString('base64');
+      var callsResp=await fetch('https://api.twilio.com/2010-04-01/Accounts/'+tSid+'/Calls.json?To='+encodeURIComponent(founderPhone)+'&PageSize=10',
+        {headers:{'Authorization':'Basic '+auth}}).then(function(x){return x.json();}).catch(function(){return null;});
+      if(callsResp&&callsResp.calls){
+        report.twilioCalls=callsResp.calls.map(function(c){return {when:c.date_created,status:c.status,from:c.from};});
+      }
+    } else { report.note+='no real Twilio credentials configured on this service; ' }
+  }catch(eT){report.note+='twilio check error: '+eT.message+'; ';}
+
+  var renderKey=process.env.RENDER_API_KEY;
+  for(var i=0;i<REACH_CREDENTIALED_SERVICES.length;i++){
+    var svc=REACH_CREDENTIALED_SERVICES[i];
+    try{
+      var deploys=await fetch('https://api.render.com/v1/services/'+svc.id+'/deploys?limit=1',
+        {headers:{'Authorization':'Bearer '+renderKey}}).then(function(x){return x.json();}).catch(function(){return [];});
+      var latest=deploys&&deploys[0]&&(deploys[0].deploy||deploys[0]);
+      report.services.push({name:svc.name,id:svc.id,latestDeployStatus:latest?latest.status:'unknown',latestDeployAt:latest?latest.createdAt:null});
+    }catch(eS){report.services.push({name:svc.name,id:svc.id,error:eS.message});}
+  }
+
+  try{
+    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
+      body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'CHATTER',
+        acl_stamp:'\u2b21B:eanew.audit:CHATTER:reach_storm_report:'+Date.now()+'\u2b21',
+        source:'eanew.audit.reach_storm.'+Date.now(),
+        summary:'[REACH STORM AUDIT, real, self-run] '+report.twilioCalls.length+' recent real calls found, '+report.services.length+' credentialed services checked. Real diagnostic only, no autonomous deploy -- a real chat should review and act.',
+        content:JSON.stringify(report),importance:8})
+    }).catch(function(){});
+  }catch(eLog){}
+  return report;
+}
+app.post('/audit/reach-storm',async function(req,res){
+  try{ res.json({ok:true,report:await auditReachStorm()}); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
 var PORT=process.env.PORT||4000;
 // ⬡B:eanew.cycle:WIRE:surface_stuck_cycle_alert:20260705⬡
