@@ -753,8 +753,16 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // summary that is a benign idle/complete state is NOT a stuck loop. Only genuine
       // repeated WORK-in-progress or FAILURE text 5+ times counts.
       var IDLE_RE = /no emails|nothing to (draft|do|review|report)|inbox (is )?empty|empty inbox|no threads|no new (email|message|thread)|all clear|nothing (here|pending)|no action|no reply drafts? (needed|required)|no pending/i;
+      // ⬡B:eanew.reconciliation:FIX:recency_bound_stale_is_not_a_loop:20260708⬡
+      // Second half of the same fix: only stamps from the last ~40min count. A station's
+      // watermark skip (advisors/gmg.js) correctly stops it re-processing, so it produces
+      // NO new result -- but its last 6 stamps stay in the brain from hours ago. Without a
+      // recency bound the detector read those 4h-old identical stamps and flagged an active
+      // loop that had already been fixed. An active fast loop shows 5+ identical stamps
+      // WITHIN the window; a station silent for hours is not looping.
+      var recentSinceIso = new Date(Date.now() - 40*60*1000).toISOString();
       for(var li=0;li<STATIONS.length;li++){
-        var recent=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var recent=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&created_at=gte.'+encodeURIComponent(recentSinceIso)+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
         if(recent&&recent.length>=5){
           var firstMsg=(recent[0].summary||'').slice(0,80);
           var repeatCount=recent.filter(function(r){return (r.summary||'').slice(0,80)===firstMsg;}).length;
