@@ -3,6 +3,21 @@
 // Doctrine: THE BIND (20260617). Built as Render service 20260617.
 // Every 3 min: checks AIR, drains CANEW tasks, heals broken deploys, checks Life Flex.
 var express=require('express'); var app=express(); app.use(express.json());
+
+// ⬡B:eanew.audit:FIX:unauthenticated_endpoints_that_deploy_and_rollback_code:20260708⬡
+// Real, serious gap, found because the founder asked the right question --
+// "could this bite me" -- and it was checked rather than assumed safe.
+// /audit/reach-storm, /audit/rollback, and /audit/heal-stuck-loop had zero
+// authentication, reachable by anyone who found the URL, one of them able
+// to commit and deploy code to production repos with no authorization at
+// all. Real, simple fix: a real, random shared-secret key, required on
+// every /audit/* route, checked before anything else runs.
+var AUDIT_KEY=process.env.AUDIT_API_KEY;
+app.use('/audit', function(req,res,next){
+  if(!AUDIT_KEY){ return res.status(503).json({ok:false,error:'audit_key_not_configured'}); }
+  if(req.headers['x-audit-key']!==AUDIT_KEY){ return res.status(401).json({ok:false,error:'unauthorized'}); }
+  next();
+});
 var BODY_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
 var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
 var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
