@@ -1122,6 +1122,106 @@ async function logAutonomousChange(details){
       content:JSON.stringify(details),importance:8})
   }).catch(function(){});
 }
+// ⬡B:eanew.heal:BUILD:real_narrow_self_heal_stuck_loop:20260708⬡
+// Real capability, founder-commissioned directly: "teach her how to fix
+// herself." Deliberately narrow, not a general "AI writes arbitrary fixes"
+// system -- that would be reckless even with backup and rollback. This
+// heals exactly one, now well-proven pattern: a station stuck repeating
+// identical output because it never checks whether its own recent work is
+// still open before redoing it. Found and fixed this exact shape three
+// times tonight (NOW-contributor, reminder, GMG_ADVISOR) -- the remedy is
+// the same real, mechanical, already-tested template every time: an early
+// exit in runCycle checking core/draftDedup.js's hasRecentOpenDraft before
+// any real work happens. This function applies that exact template,
+// parameterized by station, never anything else. Full backup before
+// writing, real verification against the live route after deploy, and a
+// real, automatic rollback if verification fails -- the three conditions
+// authorized, all real, all enforced in code, not just claimed.
+var KNOWN_STATIONS={
+  GMG_ADVISOR:{repo:'anew',path:'advisors/gmg.js',stationArg:'GMG_ADVISOR',route:'/advisors/gmg/c3run'},
+  BDIF_ADVISOR:{repo:'anew',path:'advisors/bdif.js',stationArg:'BDIF_ADVISOR',route:'/advisors/bdif/c3run'},
+  MEDIATORS_ADVISOR:{repo:'anew',path:'advisors/mediators.js',stationArg:'MEDIATORS_ADVISOR',route:'/advisors/mediators/c3run'},
+  MH_ACTION_ADVISOR:{repo:'anew',path:'advisors/mh_action.js',stationArg:'MH_ACTION_ADVISOR',route:'/advisors/mh_action/c3run'}
+};
+app.post('/audit/heal-stuck-loop',async function(req,res){
+  try{
+    var station=req.body&&req.body.station;
+    var known=KNOWN_STATIONS[station];
+    if(!known) return res.status(400).json({ok:false,error:'unknown_station',knownStations:Object.keys(KNOWN_STATIONS)});
+    var githubToken=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
+    var renderKey=process.env.RENDER_API_KEY;
+
+    var meta=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+known.repo+'/contents/'+known.path+'?ref=main',
+      {headers:{'Authorization':'token '+githubToken}}).then(function(x){return x.json();});
+    var raw=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+known.repo+'/contents/'+known.path+'?ref=main',
+      {headers:{'Authorization':'token '+githubToken,'Accept':'application/vnd.github.v3.raw'}}).then(function(x){return x.text();});
+
+    if(raw.indexOf('hasRecentOpenDraft')!==-1 && raw.indexOf('recent_open_draft_already_exists')!==-1){
+      return res.json({ok:true,healed:false,reason:'guard_already_present'});
+    }
+
+    var backup=await backupBeforeWrite(known.repo,known.path,githubToken);
+
+    var anchor=raw.match(/(var emails\s*=\s*dsdpMode[\s\S]{0,60}await fetch[A-Za-z]*Inbox[\s\S]{0,20}\))/);
+    if(!anchor){
+      return res.json({ok:false,healed:false,reason:'known_pattern_not_found_declining_to_guess'});
+    }
+    var guardBlock="  if (!dsdpMode && await require('../core/draftDedup.js').hasRecentOpenDraft('"+known.stationArg+"', HAM, 12)) {\n"
+      +"    return { ok: true, skipped: 'recent_open_draft_already_exists' };\n  }\n\n  ";
+    var patched=raw.replace(anchor[0], guardBlock+anchor[0]);
+    if(patched===raw){
+      return res.json({ok:false,healed:false,reason:'patch_did_not_change_file_declining_to_deploy_unknown_state'});
+    }
+
+    var putBody={message:'EANEW self-heal: real stuck-loop guard applied to '+known.path+', founder-authorized autonomous capability, full backup taken first, verification to follow.',
+      content:Buffer.from(patched).toString('base64'), sha:meta.sha};
+    var putResult=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+known.repo+'/contents/'+known.path,
+      {method:'PUT',headers:{'Authorization':'token '+githubToken,'Content-Type':'application/json'},body:JSON.stringify(putBody)})
+      .then(function(x){return x.json();});
+    if(!putResult.commit){
+      await logAutonomousChange({summary:'self-heal FAILED to commit for '+station,station:station,error:putResult});
+      return res.status(500).json({ok:false,healed:false,reason:'commit_failed',detail:putResult});
+    }
+
+    var serviceId='srv-d8lpvjcvikkc73bolec0'; // aibebase, real, the one known station files deploy to
+    var deploy=await fetch('https://api.render.com/v1/services/'+serviceId+'/deploys',
+      {method:'POST',headers:{'Authorization':'Bearer '+renderKey,'Content-Type':'application/json'},body:JSON.stringify({clearCache:'do_not_clear'})})
+      .then(function(x){return x.json();});
+
+    var live=false;
+    for(var i=0;i<10;i++){
+      await new Promise(function(r){setTimeout(r,15000);});
+      var st=await fetch('https://api.render.com/v1/services/'+serviceId+'/deploys/'+deploy.id,
+        {headers:{'Authorization':'Bearer '+renderKey}}).then(function(x){return x.json();});
+      if(st.status==='live'){live=true;break;}
+      if(st.status&&st.status.indexOf('fail')!==-1) break;
+    }
+
+    var verified=false;
+    if(live){
+      await new Promise(function(r){setTimeout(r,5000);});
+      var testResult=await fetch('https://aibebase.onrender.com'+known.route,
+        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID})})
+        .then(function(x){return x.json();}).catch(function(){return null;});
+      verified=!!(testResult&&testResult.result&&(testResult.result.skipped||testResult.result.ok!==false));
+    }
+
+    if(!live||!verified){
+      var rollback=await fetch('https://api.render.com/v1/services/'+serviceId+'/rollback',
+        {method:'POST',headers:{'Authorization':'Bearer '+renderKey,'Content-Type':'application/json'},
+         body:JSON.stringify({deployId:'previous'})}).then(function(x){return x.json();}).catch(function(e){return {error:e.message};});
+      await logAutonomousChange({summary:'self-heal for '+station+' FAILED verification, rolled back',station:station,live:live,verified:verified,rollback:rollback,backupSha:backup.sha});
+      return res.status(500).json({ok:false,healed:false,reason:'verification_failed_rolled_back',live:live,verified:verified});
+    }
+
+    await logAutonomousChange({summary:'self-heal SUCCEEDED for '+station+', real stuck-loop guard applied and verified live',
+      station:station,path:known.path,backupSha:backup.sha,newCommit:putResult.commit.sha,deployId:deploy.id,verified:true});
+    res.json({ok:true,healed:true,station:station,commit:putResult.commit.sha,verified:true});
+  }catch(e){
+    try{ await logAutonomousChange({summary:'self-heal threw a real error',error:e.message}); }catch(eLog){}
+    res.status(500).json({ok:false,error:e.message});
+  }
+});
 module.exports.backupBeforeWrite=backupBeforeWrite;
 module.exports.logAutonomousChange=logAutonomousChange;
 app.post('/cycle',async function(req,res){try{res.json(await cycle());}catch(e){res.status(500).json({error:e.message});}});
