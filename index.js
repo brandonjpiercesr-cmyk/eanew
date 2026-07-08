@@ -743,12 +743,23 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // needs to be caught in minutes, not a day. Same summary text repeating
       // 5+ times in a row for one station, no real progress, real alert.
       var loopFlags=[];
+      // ⬡B:eanew.reconciliation:FIX:idle_is_not_a_stuck_loop:20260708⬡
+      // Founder correction 20260708: this flagged HEALTHY idle advisors as stuck loops.
+      // Advisors run every ~3min by design (contributors.js); when an inbox is empty they
+      // correctly produce a near-identical "no emails, nothing to draft" result every
+      // cycle. That is a station idling correctly, not repeating a FAILURE -- but the
+      // 80-char-match rule saw the identical text and cried wolf every 3min, and every
+      // false alarm became a held outreach the founder never asked for. Fix: a repeated
+      // summary that is a benign idle/complete state is NOT a stuck loop. Only genuine
+      // repeated WORK-in-progress or FAILURE text 5+ times counts.
+      var IDLE_RE = /no emails|nothing to (draft|do|review|report)|inbox (is )?empty|empty inbox|no threads|no new (email|message|thread)|all clear|nothing (here|pending)|no action|no reply drafts? (needed|required)|no pending/i;
       for(var li=0;li<STATIONS.length;li++){
         var recent=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
         if(recent&&recent.length>=5){
           var firstMsg=(recent[0].summary||'').slice(0,80);
           var repeatCount=recent.filter(function(r){return (r.summary||'').slice(0,80)===firstMsg;}).length;
-          if(repeatCount>=5) loopFlags.push({station:STATIONS[li],repeatedSummary:firstMsg,repeatCount:repeatCount});
+          // Idle/complete repetition is healthy; only real repeated work/failure is a loop.
+          if(repeatCount>=5 && !IDLE_RE.test(firstMsg)) loopFlags.push({station:STATIONS[li],repeatedSummary:firstMsg,repeatCount:repeatCount});
         }
       }
       if(loopFlags.length>0){
