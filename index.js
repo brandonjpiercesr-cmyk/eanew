@@ -967,6 +967,24 @@ app.post('/eanew/ask',async function(req,res){
       var allBeads=(doc||[]).concat(identity||[]).concat(lifeflex||[]).concat(anuos||[]);
       memory=allBeads.map(function(b){return '- '+(b.summary||b.source);}).join('\n');
     }
+    // ⬡B:eanew.ask:WIRE:full_cycle_through_pai_door_1_4:20260709⬡
+    // Quick Fix 1.4: "a chat box is not a shortcut around the real cycle." The vowel
+    // now commands the FULL process -- the PAI turn door on the mind (FCW, FIND, tool
+    // loop, synthesis) -- before voicing. If the full turn answers, that IS the answer
+    // she voices. If the door fails, the existing memory+stations pass is the fallback
+    // so the portal never goes dumb. Vowels rule intact end to end.
+    var fullTurn=null;
+    try{
+      var priorTurns=(req.body&&req.body.priorTurns)||[];
+      var pd=await fetch((process.env.AIBEBASE_URL||'https://aibebase.onrender.com')+'/pai/turn',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({hamUid:HAM_UID,message:question,priorTurns:priorTurns,channel:'portal',portal:'ccwa'})});
+      var pj=pd.ok?await pd.json():null;
+      if(pj&&pj.ok&&pj.text) fullTurn=pj.text;
+    }catch(ePai){console.error('[eanew/ask pai door]',ePai.message);}
+    if(fullTurn){
+      return res.json({ok:true,reply:fullTurn,answer:fullTurn,via:'full_cycle'});
+    }
     // PAI fan-out: consult the live stations first, so the answer reflects real system state, not a guess.
     var stationReads=await consultStations(question);
     var system='You are A\u2019NU, the single voice the user talks to. You are warm, real, and direct. '
