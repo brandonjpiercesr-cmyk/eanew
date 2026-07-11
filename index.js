@@ -648,7 +648,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         }catch(eCheck){continue;}
         try{
           await fetch(AIBEBASE_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({hamUid:rem.ham_uid,prompt:'Remind them, in your own words: '+rc.text})});
+            body:JSON.stringify({hamUid:rem.ham_uid,prompt:'A reminder you set earlier is due now. Deliver it to the founder as a short, warm message in your own words. Do not create a new reminder, do not call any tool -- just say this to him now: '+rc.text})});
           await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
             headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
             body:JSON.stringify({ham_uid:rem.ham_uid,agent_global:'PAI',stamp_type:'REMINDER',
