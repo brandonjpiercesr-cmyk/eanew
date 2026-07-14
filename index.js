@@ -635,8 +635,17 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // reminder id; if it does, this reminder already fired, skip it. No
       // schema change, no update-in-place needed, just a real check against
       // what the log already contains.
+      // ⬡B:eanew.reminders:FIX:batch_per_ham_not_one_text_per_reminder:20260714⬡
+      // Founder, live and severe: this loop fired ONE STANDALONE TEXT PER DUE REMINDER, no
+      // batching. When several landed due in the same window (confirmed: 20 unfired sitting
+      // in the pool at once), he got 5-7 separate one-line texts back to back. Fixed: gather
+      // every due, unfired reminder, group by ham_uid, and for each HAM fire exactly ONE
+      // /reach/out call with every due item bundled into a single warm message. Every
+      // individual reminder still gets its own fired-marker bead (Command Center and
+      // per-item dedup stay intact); only the OUTBOUND SEND is consolidated.
       var dueReminders=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.REMINDER&order=created_at.desc&limit=30&select=id,ham_uid,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var AIBEBASE_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
+      var dueByHam={};
       for(var ri=0;ri<(dueReminders||[]).length;ri++){
         var rem=dueReminders[ri];
         var rc=rem.content; try{rc=JSON.parse(rc);}catch(e){rc={};}
@@ -646,18 +655,32 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           var alreadyFired=await fetch(BU+'/rest/v1/aibe_brain?source=ilike.eanew.reminder.fired.'+rem.id+'.%25&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
           if(alreadyFired&&alreadyFired.length) continue;
         }catch(eCheck){continue;}
+        (dueByHam[rem.ham_uid]=dueByHam[rem.ham_uid]||[]).push(rem);
+      }
+      var hamIds=Object.keys(dueByHam);
+      for(var hi=0;hi<hamIds.length;hi++){
+        var hamUidX=hamIds[hi];
+        var group=dueByHam[hamUidX];
+        var texts=group.map(function(g){var c=g.content;try{c=JSON.parse(c);}catch(e){c={};}return String(c.text||'').trim();}).filter(Boolean);
+        if(!texts.length) continue;
+        var promptText = texts.length===1
+          ? 'A reminder you set earlier is due now. Deliver it to the founder as a short, warm message in your own words. Do not create a new reminder, do not call any tool -- just say this to him now: '+texts[0]
+          : texts.length+' reminders you set earlier are all due now. Deliver ALL of them together as ONE short, warm message, naturally grouped, not a robotic list. Do not create a new reminder, do not call any tool -- just say these to him now, together: '+texts.map(function(t,i){return (i+1)+') '+t;}).join(' ');
         try{
           await fetch(AIBEBASE_URL+'/reach/out',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({hamUid:rem.ham_uid,prompt:'A reminder you set earlier is due now. Deliver it to the founder as a short, warm message in your own words. Do not create a new reminder, do not call any tool -- just say this to him now: '+rc.text})});
+            body:JSON.stringify({hamUid:hamUidX,prompt:promptText})});
+        }catch(eFire){continue;}
+        for(var gi=0;gi<group.length;gi++){
+          var g2=group[gi]; var rc2=g2.content; try{rc2=JSON.parse(rc2);}catch(e){rc2={};}
           await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
             headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-            body:JSON.stringify({ham_uid:rem.ham_uid,agent_global:'PAI',stamp_type:'REMINDER',
-              acl_stamp:'\u2b21B:eanew.reminders:REMINDER:fired:'+Date.now()+'\u2b21',
-              source:'eanew.reminder.fired.'+rem.id+'.'+Date.now(),
-              summary:'[REMINDER FIRED] '+String(rc.text||'').slice(0,100),
-              content:JSON.stringify(Object.assign({},rc,{fired:true,firedAt:new Date().toISOString()})),importance:5})
+            body:JSON.stringify({ham_uid:hamUidX,agent_global:'PAI',stamp_type:'REMINDER',
+              acl_stamp:'⬡B:eanew.reminders:REMINDER:fired:'+Date.now()+'⬡',
+              source:'eanew.reminder.fired.'+g2.id+'.'+Date.now(),
+              summary:'[REMINDER FIRED, batched x'+group.length+'] '+String(rc2.text||'').slice(0,100),
+              content:JSON.stringify(Object.assign({},rc2,{fired:true,firedAt:new Date().toISOString(),batchedWith:group.length-1})),importance:5})
           }).catch(function(){});
-        }catch(eFire){}
+        }
       }
     }catch(remErr){}
   }
