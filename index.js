@@ -112,11 +112,25 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       if (targetFile && BU && BK) {
         var collisionHeld = false;
         try {
-          var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=in.(TASK,TASK_HELD)&content=ilike.*' +
-            encodeURIComponent(targetFile) + '*&select=source&limit=5';
+          // \u2b21B:eanew.cycle:FIX:collision_owner_is_oldest_live_task:20260716\u2b21
+          // Live incident, found the day the whole department went silent: five
+          // auto-queued duplicate cleanup tasks all named the same targetFile and
+          // this guard held each one on the others, forever -- tasks:0 for four
+          // straight days while the queue said 97. Two wrongs fixed. One: a
+          // TASK_HELD row is set aside, it will never build, so it must never
+          // count as an owner (it was poisoning every live task that shared its
+          // file). Two: when live duplicates DO collide, exactly one must own or
+          // nobody ever dispatches -- ownership is deterministic, the
+          // lexicographically smallest source among live colliders, so one task
+          // always proceeds and the queue always advances.
+          var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=eq.TASK&content=ilike.*' +
+            encodeURIComponent(targetFile) + '*&select=source&limit=10';
           var collideRows = await fetch(collideUrl, { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
             .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
-          var otherOwner = (collideRows || []).find(function(row){ return row.source !== task.source; });
+          var liveSources = (collideRows || []).map(function(row){ return row.source; });
+          if (liveSources.indexOf(task.source) === -1) liveSources.push(task.source);
+          liveSources.sort();
+          var otherOwner = liveSources[0] !== task.source ? { source: liveSources[0] } : null;
           if (otherOwner) {
             r.checks.collisionGuard = { held: true, targetFile: targetFile, ownedBy: otherOwner.source };
             collisionHeld = { collisionGuardHeld: true, targetFile: targetFile, ownedBy: otherOwner.source };
