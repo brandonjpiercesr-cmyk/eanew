@@ -6,15 +6,11 @@ import fetch from 'node-fetch'
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_KEY
-const BRAIN_URL = process.env.MEMORY_BANK_URL || process.env.AIBE_BRAIN_URL || 'http://brain:3002'
+const BRAIN_URL = process.env.AIBE_BRAIN_URL || 'http://brain:3002'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 // FIX B: Echo filter - check if from_email appears in any EANEW bead within last hour
-// ⬡B:eanew:WIRE:funneled_to_one_bank:20260716⬡ Table and schema from env, legacy defaults.
-var BEAD_TBL = process.env.BEAD_TABLE || 'aibe_brain'; // funnel: one department, one bank
-var BR_SCHEMA = process.env.BRAIN_SCHEMA || BR_SCHEMA;
-
 async function echoFilter(fromEmail) {
   const oneHourAgo = new Date(Date.now() - 3600000).toISOString()
   
