@@ -12,10 +12,6 @@ var express=require('express'); var app=express(); app.use(express.json());
 // to commit and deploy code to production repos with no authorization at
 // all. Real, simple fix: a real, random shared-secret key, required on
 // every /audit/* route, checked before anything else runs.
-// ⬡B:eanew:WIRE:funneled_to_one_bank:20260716⬡ Table and schema from env, legacy defaults.
-var BEAD_TBL = process.env.BEAD_TABLE || 'aibe_brain'; // funnel: one department, one bank
-var BR_SCHEMA = process.env.BRAIN_SCHEMA || BR_SCHEMA;
-
 var AUDIT_KEY=process.env.AUDIT_API_KEY;
 app.use('/audit', function(req,res,next){
   if(!AUDIT_KEY){ return res.status(503).json({ok:false,error:'audit_key_not_configured'}); }
@@ -26,15 +22,15 @@ var BODY_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
 var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
 var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
 var cooldown = null; try { cooldown = require('./cooldown'); } catch(e) { console.log('[EANEW] cooldown not found:', e.message); }
-var BU = process.env.MEMORY_BANK_URL || process.env.AIBE_BRAIN_URL; var BK = process.env.MEMORY_BANK_KEY || process.env.AIBE_BRAIN_KEY;
+var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
 var RKEY=process.env.RENDER_API_KEY;
 var MS=3*60*1000;
 var HAM_UID=process.env.HAM_UID||process.env.FOUNDER_HAM_UID; // env-driven only, no literal fallback, per W3
-function bh(){return {apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA};}
+function bh(){return {apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'};}
 async function stamp(payload){
   if(!BU||!BK)return;
-  await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+  await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
     body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',
       acl_stamp:'⬡B:eanew.watcher:RESULT:cycle:20260617⬡',stamp_type:'RESULT',
       source:'eanew.cycle.'+Date.now(),content:JSON.stringify(payload),
@@ -127,9 +123,9 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // nobody ever dispatches -- ownership is deterministic, the
           // lexicographically smallest source among live colliders, so one task
           // always proceeds and the queue always advances.
-          var collideUrl = BU + '/rest/v1/'+BEAD_TBL+'?stamp_type=eq.TASK&content=ilike.*' +
+          var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=eq.TASK&content=ilike.*' +
             encodeURIComponent(targetFile) + '*&select=source&limit=10';
-          var collideRows = await fetch(collideUrl, { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': BR_SCHEMA } })
+          var collideRows = await fetch(collideUrl, { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
             .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
           var liveSources = (collideRows || []).map(function(row){ return row.source; });
           if (liveSources.indexOf(task.source) === -1) liveSources.push(task.source);
@@ -215,8 +211,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // runs unchanged for any HAM's task.
       try{
         var fbSrc='eanew.giveup.'+task.source;
-        var fbRows=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(fbSrc)+'&select=content&order=created_at.desc&limit=1',
-          {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA}})
+        var fbRows=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(fbSrc)+'&select=content&order=created_at.desc&limit=1',
+          {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
           .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
         if(fbRows&&fbRows[0]&&fbRows[0].content){
           var fb=null; try{ fb=JSON.parse(fbRows[0].content); }catch(ePf){ fb=null; }
@@ -309,8 +305,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         // feedback wire reads this bead) and the loop cannot spin forever on a
         // builder that fabricates shas.
         try{
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
               source:task.source+'.INCOMPLETE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260703\u2b21',
@@ -319,13 +315,13 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               importance:7})
           }).catch(function(){});
           var pvSrc='eanew.giveup.'+task.source;
-          var pvPrior=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(pvSrc)+'&select=content&order=created_at.desc&limit=1',
-            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA}})
+          var pvPrior=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(pvSrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
             .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
           var pvN=1;
           if(pvPrior&&pvPrior[0]){ try{ pvN=(JSON.parse(pvPrior[0].content).tries||0)+1; }catch(ePv){ pvN=1; } }
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
               source:pvSrc,
               acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260703\u2b21',
@@ -340,8 +336,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // phantoming without ever failing outright would never shelve. Same
           // cap, same shelf action, same counter key, now enforced here too.
           if(pvN>=3){
-            await fetch(BU+'/rest/v1/'+BEAD_TBL+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
                body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+pvN+' straight phantom commits. Needs Brandon or a respec.',type:'GIVE_UP'});
           }
@@ -356,8 +352,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // TASK_INCOMPLETE instead, keeping the task pending and the record honest.
       if(buildResp&&buildResp.ok&&!buildResp.sha){
         try{
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
               source:task.source+'.INCOMPLETE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260702\u2b21',
@@ -376,8 +372,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         // own source, the moment PAI reports a real ok. span.query v11 (same
         // dated fix, aibebase side) matches exactly this and nothing looser.
         try{
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_DONE',
               source:task.source+'.DONE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_DONE:'+(task.label||'task')+':20260702\u2b21',
@@ -400,8 +396,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // lower importance below the cutoff, invisible to /span/next-task no
           // matter how many cycles ran. Same PATCH pattern already used for
           // TASK_HELD below -- terminal-state UPDATE, never a DELETE on a BEAD.
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-            {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+            {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
              body:JSON.stringify({stamp_type:'TASK_DONE'})}).catch(function(){});
         }catch(eDone){}
       }
@@ -418,14 +414,14 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         try{
           var GIVE_UP_AT=3;
           var trySrc='eanew.giveup.'+task.source;
-          var priorTries=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(trySrc)+'&select=content&order=created_at.desc&limit=1',
-            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA}})
+          var priorTries=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(trySrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
             .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
           var n=1;
           if(priorTries&&priorTries[0]){ try{ n=(JSON.parse(priorTries[0].content).tries||0)+1; }catch(e){ n=1; } }
           // Supersede the try-counter (terminal-state UPDATE style: newest wins on read)
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
               source:trySrc,
               acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260702\u2b21',
@@ -435,8 +431,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           if(n>=GIVE_UP_AT){
             // Set the task aside so the queue advances. PATCH to TASK_HELD --
             // terminal state via update, never a DELETE on a BEAD.
-            await fetch(BU+'/rest/v1/'+BEAD_TBL+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':BR_SCHEMA,'Content-Type':'application/json',Prefer:'return=minimal'},
+            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
                body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+n+' failed builds (last: '+((buildResp&&buildResp.verdict)||'not_ok')+'). Needs Brandon or a respec.',type:'GIVE_UP'});
           }
@@ -543,7 +539,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   }
   // 4. Life Flex -- did it really send?
   if(BU&&BK){
-    var lf=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.LIFE_FLEX_FIRED&source=like.life_flex.fired.*&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+    var lf=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.LIFE_FLEX_FIRED&source=like.life_flex.fired.*&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
     var lfData=lf&&lf[0]?JSON.parse(lf[0].content||'{}'):{};
     if(!lf||!lf[0]){// bead presence = proof of fire. anyRealSend/sends not required.
       await fetch(BODY_URL+'/life-flex/fire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
@@ -661,7 +657,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // /reach/out call with every due item bundled into a single warm message. Every
       // individual reminder still gets its own fired-marker bead (Command Center and
       // per-item dedup stay intact); only the OUTBOUND SEND is consolidated.
-      var dueReminders=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.REMINDER&order=created_at.desc&limit=30&select=id,ham_uid,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var dueReminders=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.REMINDER&order=created_at.desc&limit=30&select=id,ham_uid,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var AIBEBASE_URL=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
       var dueByHam={};
       for(var ri=0;ri<(dueReminders||[]).length;ri++){
@@ -670,7 +666,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         if(rc.fired) continue;
         if(!rc.due_at||new Date(rc.due_at).getTime()>Date.now()) continue;
         try{
-          var alreadyFired=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?source=ilike.eanew.reminder.fired.'+rem.id+'.%25&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var alreadyFired=await fetch(BU+'/rest/v1/aibe_brain?source=ilike.eanew.reminder.fired.'+rem.id+'.%25&limit=1&select=id',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
           if(alreadyFired&&alreadyFired.length) continue;
         }catch(eCheck){continue;}
         (dueByHam[rem.ham_uid]=dueByHam[rem.ham_uid]||[]).push(rem);
@@ -690,8 +686,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         }catch(eFire){continue;}
         for(var gi=0;gi<group.length;gi++){
           var g2=group[gi]; var rc2=g2.content; try{rc2=JSON.parse(rc2);}catch(e){rc2={};}
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
             body:JSON.stringify({ham_uid:hamUidX,agent_global:'PAI',stamp_type:'REMINDER',
               acl_stamp:'⬡B:eanew.reminders:REMINDER:fired:'+Date.now()+'⬡',
               source:'eanew.reminder.fired.'+g2.id+'.'+Date.now(),
@@ -711,18 +707,18 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   // words: permission to propose, not to commit directly.
   if(BU&&BK){
     try{
-      var lastSelfReview=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.SELF_REVIEW&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var lastSelfReview=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SELF_REVIEW&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var lastSRAt=lastSelfReview&&lastSelfReview[0]?new Date(lastSelfReview[0].created_at).getTime():0;
       var hoursSinceSR=(Date.now()-lastSRAt)/3600000;
       if(hoursSinceSR>=4){
         var sinceIsoSR=new Date(Date.now()-4*3600000).toISOString();
-        var silentTurns=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.CYCLE_STEP&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&summary=ilike.*cycle_end_silent*&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
-        var noToolTurns=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?source=like.clair.diagnostic.no_tool_turn*&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var silentTurns=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.CYCLE_STEP&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&summary=ilike.*cycle_end_silent*&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var noToolTurns=await fetch(BU+'/rest/v1/aibe_brain?source=like.clair.diagnostic.no_tool_turn*&created_at=gte.'+encodeURIComponent(sinceIsoSR)+'&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
         var frictionCount=(silentTurns?silentTurns.length:0)+(noToolTurns?noToolTurns.length:0);
         if(frictionCount>=3){
           var proposalName='span.task.self_review_friction_'+Date.now();
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK',
               acl_stamp:'\u2b21B:eanew.selfreview:TASK:proposed:'+Date.now()+'\u2b21',
               source:proposalName,
@@ -731,8 +727,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               importance:6})
           }).catch(function(){});
         }
-        await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+        await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
           body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'SELF_REVIEW',
             acl_stamp:'\u2b21B:eanew.selfreview:SELF_REVIEW:ran:'+Date.now()+'\u2b21',
             source:'eanew.selfreview.'+Date.now(),
@@ -748,14 +744,14 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         // silently, inside the same queue as everything else. This makes the real
         // count impossible to miss instead of easy to lose.
         try {
-          var allWiring=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.TASK&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
-          var doneWiring=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.TASK_DONE&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var allWiring=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var doneWiring=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.TASK_DONE&source=like.span.task.wiring_cleanup*&select=source',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
           var doneSet={};
           (doneWiring||[]).forEach(function(d){doneSet[d.source]=true;});
           var openWiring=(allWiring||[]).filter(function(w){return !doneSet[w.source];});
           if(openWiring.length>0){
-            await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-              headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+            await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+              headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
               body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'DRAFT_PENDING',
                 acl_stamp:'\u2b21B:eanew.wiringdebt:DRAFT_PENDING:backlog_report:'+Date.now()+'\u2b21',
                 source:'eanew.wiringdebt.'+Date.now(),
@@ -803,7 +799,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // WITHIN the window; a station silent for hours is not looping.
       var recentSinceIso = new Date(Date.now() - 40*60*1000).toISOString();
       for(var li=0;li<STATIONS.length;li++){
-        var recent=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&created_at=gte.'+encodeURIComponent(recentSinceIso)+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+        var recent=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(STATIONS[li])+'&created_at=gte.'+encodeURIComponent(recentSinceIso)+'&order=created_at.desc&limit=6&select=summary',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
         if(recent&&recent.length>=5){
           var firstMsg=(recent[0].summary||'').slice(0,80);
           var repeatCount=recent.filter(function(r){return (r.summary||'').slice(0,80)===firstMsg;}).length;
@@ -812,8 +808,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         }
       }
       if(loopFlags.length>0){
-        await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+        await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+          headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
           body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
             acl_stamp:'\u2b21B:eanew.reconciliation:ALERT:stuck_loop:'+Date.now()+'\u2b21',
             source:'eanew.reconciliation.loop.'+Date.now(),
@@ -821,22 +817,22 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             content:JSON.stringify({loopFlags:loopFlags}),importance:9})
         }).catch(function(){});
       }
-      var lastRecon=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.RECONCILIATION&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      var lastRecon=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.RECONCILIATION&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var lastReconAt=lastRecon&&lastRecon[0]?new Date(lastRecon[0].created_at).getTime():0;
       var hoursSinceRecon=(Date.now()-lastReconAt)/3600000;
       if(hoursSinceRecon>=24){
         var staleness=[];
         for(var si=0;si<STATIONS.length;si++){
           var st=STATIONS[si];
-          var lastRow=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?agent_global=eq.'+encodeURIComponent(st)+'&order=created_at.desc&limit=1&select=created_at',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+          var lastRow=await fetch(BU+'/rest/v1/aibe_brain?agent_global=eq.'+encodeURIComponent(st)+'&order=created_at.desc&limit=1&select=created_at',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
           var lastAt=lastRow&&lastRow[0]?new Date(lastRow[0].created_at).getTime():0;
           var hoursSince=lastAt?((Date.now()-lastAt)/3600000):null;
           staleness.push({station:st,hoursSinceLastReport:hoursSince===null?null:Math.round(hoursSince)});
         }
         var stale=staleness.filter(function(s){return s.hoursSinceLastReport===null||s.hoursSinceLastReport>48;});
         if(stale.length>0){
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
               acl_stamp:'\u2b21B:eanew.reconciliation:ALERT:stale_station:'+Date.now()+'\u2b21',
               source:'eanew.reconciliation.'+Date.now(),
@@ -844,8 +840,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               content:JSON.stringify({allStations:staleness,staleStations:stale}),importance:8})
           }).catch(function(){});
         } else {
-          await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'RECONCILIATION',
               acl_stamp:'\u2b21B:eanew.reconciliation:RECONCILIATION:all_clear:'+Date.now()+'\u2b21',
               source:'eanew.reconciliation.'+Date.now(),
@@ -899,8 +895,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         try {
           var BLOOIO_KEY = process.env.BLOOIO_API_KEY;
           if (BLOOIO_KEY && BU && BK) {
-            var phoneRows = await fetch(BU + '/rest/v1/'+BEAD_TBL+'?stamp_type=eq.HAM_IDENTIFIER&ham_uid=eq.' + HAM_UID + '&limit=3',
-              { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': BR_SCHEMA } })
+            var phoneRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=eq.HAM_IDENTIFIER&ham_uid=eq.' + HAM_UID + '&limit=3',
+              { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
               .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
             var ph = null;
             for (var p = 0; p < (phoneRows||[]).length; p++) {
@@ -957,14 +953,14 @@ async function consultStations(question){
   // Station 4: OVERSEER recent MINUTES (what she did last cycle — rolling self-awareness)
   try{
     if(BU&&BK){
-      var mins=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.MINUTES&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA,'Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var mins=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.MINUTES&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       if(mins&&mins[0]) stations.push('LAST_WORK: '+(mins[0].summary||'').replace('[EANEW MINUTES] ','').slice(0,60));
     }
   }catch(e){}
   // Station 5: SCW for this HAM (offline bootstrap if available)
   try{
     if(BU&&BK){
-      var scw=await fetch(BU+'/rest/v1/'+BEAD_TBL+'?stamp_type=eq.SCW&ham_uid=eq.'+encodeURIComponent(HAM_UID)+'&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA,'Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var scw=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.SCW&ham_uid=eq.'+encodeURIComponent(HAM_UID)+'&order=created_at.desc&limit=1',{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core','Range':'0-0'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       if(scw&&scw[0]){var sc=JSON.parse(scw[0].content||'{}');stations.push('CONTEXT: '+sc.world+' world loaded — role: '+(sc.role||'').slice(0,40));}
     }
   }catch(e){}
@@ -973,7 +969,7 @@ async function consultStations(question){
   // firewall: surface THAT advisor work happened and which world, never client content.
   try{
     if(BU&&BK){
-      var adv=await fetch(BU+"/rest/v1/aibe_brain?agent_global=eq.ADVISOR&stamp_type=eq.CONTRIBUTION&order=created_at.desc&limit=5&select=summary,created_at",{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':BR_SCHEMA}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
+      var adv=await fetch(BU+"/rest/v1/aibe_brain?agent_global=eq.ADVISOR&stamp_type=eq.CONTRIBUTION&order=created_at.desc&limit=5&select=summary,created_at",{headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}}).then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
       if(adv&&adv.length){
         var fresh=adv.filter(function(a){return (Date.now()-new Date(a.created_at).getTime())<25*60*60*1000;});
         if(fresh.length) stations.push('ADVISORS: '+fresh.length+' recent cycle(s), latest '+((fresh[0].summary||'').replace('[ADVISOR] ','').slice(0,50)||'reviewed'));
@@ -1132,8 +1128,8 @@ async function auditReachStorm(){
   }
 
   try{
-    await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
       body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'CHATTER',
         acl_stamp:'\u2b21B:eanew.audit:CHATTER:reach_storm_report:'+Date.now()+'\u2b21',
         source:'eanew.audit.reach_storm.'+Date.now(),
@@ -1164,8 +1160,8 @@ async function backupBeforeWrite(repo,path,githubToken){
   var raw=await fetch('https://api.github.com/repos/brandonjpiercesr-cmyk/'+repo+'/contents/'+path+'?ref=main',
     {headers:{'Authorization':'token '+githubToken,'Accept':'application/vnd.github.v3.raw'}}).then(function(x){return x.text();});
   var backupRecord={repo:repo,path:path,sha:meta.sha,content:raw,backedUpAt:new Date().toISOString()};
-  await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+  await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
     body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'KEY_BACKUP',
       acl_stamp:'\u2b21B:eanew.deploy:KEY_BACKUP:pre_write_backup:'+Date.now()+'\u2b21',
       source:'eanew.deploy.backup.'+repo+'.'+path.replace(/\//g,'_')+'.'+Date.now(),
@@ -1191,8 +1187,8 @@ app.post('/audit/rollback',async function(req,res){
       method:'POST',headers:{'Authorization':'Bearer '+renderKey,'Content-Type':'application/json'},
       body:JSON.stringify({deployId:lastLive.id})
     }).then(function(x){return x.json();}).catch(function(e){return {error:e.message};});
-    await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+    await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+      headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
       body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'DIRECTIVE',
         acl_stamp:'\u2b21B:eanew.deploy:DIRECTIVE:rollback_executed:'+Date.now()+'\u2b21',
         source:'eanew.deploy.rollback.'+serviceId+'.'+Date.now(),
@@ -1206,8 +1202,8 @@ app.post('/audit/rollback',async function(req,res){
 // 3) REAL DETAILED NOTES: every autonomous write, real specifics, not a
 // vague log line -- what changed, why, backup reference, verification.
 async function logAutonomousChange(details){
-  await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+  await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+    headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
     body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'RESULT',
       acl_stamp:'\u2b21B:eanew.deploy:RESULT:autonomous_change_notated:'+Date.now()+'\u2b21',
       source:'eanew.deploy.change.'+Date.now(),
@@ -1332,8 +1328,8 @@ async function tickCycle(){
   try {
     var result = await cycle();
     if (result && result.timedOut && BU && BK) {
-      await fetch(BU+'/rest/v1/'+BEAD_TBL+'',{method:'POST',
-        headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':BR_SCHEMA,Prefer:'return=minimal'}),
+      await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+        headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
         body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',
           acl_stamp:'⬡B:eanew.cycle.timeout:ALERT:surfaced:'+Date.now()+'⬡',stamp_type:'ALERT',
           source:'eanew.cycle.timeout.'+Date.now(),
