@@ -4,13 +4,9 @@
 const BU = process.env.AIBE_BRAIN_URL;
 const BK = process.env.AIBE_BRAIN_KEY;
 const AIBE = process.env.AIBE_URL || 'https://aibebase.onrender.com';
-function bh() { return { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': BR_SCHEMA }; }
+function bh() { return { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' }; }
 
 // Step: check IMAN for new advisor emails
-// ⬡B:eanew:WIRE:funneled_to_one_bank:20260716⬡ Table and schema from env, legacy defaults.
-var BEAD_TBL = process.env.BEAD_TABLE || 'aibe_brain'; // funnel: one department, one bank
-var BR_SCHEMA = process.env.BRAIN_SCHEMA || BR_SCHEMA;
-
 async function checkIman() {
   try {
     const r = await fetch(AIBE + '/iman/inbound', { headers: { 'Content-Type': 'application/json' } });
@@ -64,7 +60,7 @@ function judge(cycleData) {
 // marked clearly as a fallback, never silently passed off as real thought.
 async function loadVoiceDoctrine() {
   try {
-    const r = await fetch(BU + '/rest/v1/'+BEAD_TBL+'?source=eq.doctrine.voice.coffee_shop_test&select=content&limit=1', { headers: bh() });
+    const r = await fetch(BU + '/rest/v1/aibe_brain?source=eq.doctrine.voice.coffee_shop_test&select=content&limit=1', { headers: bh() });
     if (!r.ok) return null;
     const rows = await r.json();
     return (rows && rows[0]) ? rows[0].content : null;
@@ -121,7 +117,7 @@ async function stampMinutes(cycleData, surface) {
     chatter = parts.join(' ');
   }
   try {
-    await fetch(BU + '/rest/v1/'+BEAD_TBL+'', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': BR_SCHEMA, 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, real: real, surface: surface, built: built, ts: ts }) }) });
+    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, real: real, surface: surface, built: built, ts: ts }) }) });
   } catch(e) {}
   return chatter;
 }
