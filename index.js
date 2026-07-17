@@ -23,6 +23,28 @@ var CANEW=process.env.CANEW_URL||'https://canew.onrender.com';
 var triplet = null; try { triplet = require('./ops/abc.triplet.watcher.js'); } catch(e) { console.log('[EANEW] triplet watcher not found:', e.message); }
 var cooldown = null; try { cooldown = require('./cooldown'); } catch(e) { console.log('[EANEW] cooldown not found:', e.message); }
 var BU=process.env.AIBE_BRAIN_URL; var BK=process.env.AIBE_BRAIN_KEY;
+// ⬡B:eanew.cycle:WIRE:queue_bank_follows_span:20260717⬡
+// Live incident 20260717, 235 build attempts on one task in 12h, 180 failure
+// emails, GitHub Actions minutes exhausted. Root cause: the July 13 cutover
+// moved the queue to the new bank but not this service. aibebase
+// core/span.query.js reads MEMORY_BANK_URL||AIBE_BRAIN_URL with BEAD_TABLE,
+// so /span/next-task hands out rows from memory_bank.beads. This service wrote
+// its give-up counter and its TASK->TASK_HELD shelf into abacia_core.aibe_brain
+// instead. The stop signal landed in a bank nobody reads: the task read
+// TASK_HELD in legacy and TASK in the new bank, so the queue handed the same
+// task back every 3 minutes forever while the counter honestly logged 233/3.
+// The reader and the writer must agree on which bank the queue lives in.
+// Same accessor shape span.query.js already uses; defaults preserve legacy
+// behaviour exactly, so with no env set this file behaves as it did before.
+// Task lane only. Reminders, life-flex, self-review and reconciliation still
+// read the archive on purpose and are untouched here.
+var QBU=process.env.MEMORY_BANK_URL||process.env.AIBE_BRAIN_URL;
+var QBK=process.env.MEMORY_BANK_KEY||process.env.AIBE_BRAIN_KEY;
+var QTBL=process.env.BEAD_TABLE||'aibe_brain';
+var QSCH=process.env.BEAD_SCHEMA||'abacia_core';
+function QT(){return QBU+'/rest/v1/'+QTBL;}
+function qrh(){return {apikey:QBK,Authorization:'Bearer '+QBK,'Accept-Profile':QSCH};}
+function qwh(){return {apikey:QBK,Authorization:'Bearer '+QBK,'Content-Profile':QSCH,'Content-Type':'application/json',Prefer:'return=minimal'};}
 var RKEY=process.env.RENDER_API_KEY;
 var MS=3*60*1000;
 var HAM_UID=process.env.HAM_UID||process.env.FOUNDER_HAM_UID; // env-driven only, no literal fallback, per W3
@@ -123,9 +145,9 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // nobody ever dispatches -- ownership is deterministic, the
           // lexicographically smallest source among live colliders, so one task
           // always proceeds and the queue always advances.
-          var collideUrl = BU + '/rest/v1/aibe_brain?stamp_type=eq.TASK&content=ilike.*' +
+          var collideUrl = QT() + '?stamp_type=eq.TASK&content=ilike.*' +
             encodeURIComponent(targetFile) + '*&select=source&limit=10';
-          var collideRows = await fetch(collideUrl, { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
+          var collideRows = await fetch(collideUrl, { headers: qrh() })
             .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
           var liveSources = (collideRows || []).map(function(row){ return row.source; });
           if (liveSources.indexOf(task.source) === -1) liveSources.push(task.source);
@@ -211,8 +233,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // runs unchanged for any HAM's task.
       try{
         var fbSrc='eanew.giveup.'+task.source;
-        var fbRows=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(fbSrc)+'&select=content&order=created_at.desc&limit=1',
-          {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+        var fbRows=await fetch(QT()+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(fbSrc)+'&select=content&order=created_at.desc&limit=1',
+          {headers:qrh()})
           .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
         if(fbRows&&fbRows[0]&&fbRows[0].content){
           var fb=null; try{ fb=JSON.parse(fbRows[0].content); }catch(ePf){ fb=null; }
@@ -305,8 +327,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         // feedback wire reads this bead) and the loop cannot spin forever on a
         // builder that fabricates shas.
         try{
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
               source:task.source+'.INCOMPLETE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260703\u2b21',
@@ -315,13 +337,13 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
               importance:7})
           }).catch(function(){});
           var pvSrc='eanew.giveup.'+task.source;
-          var pvPrior=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(pvSrc)+'&select=content&order=created_at.desc&limit=1',
-            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+          var pvPrior=await fetch(QT()+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(pvSrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:qrh()})
             .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
           var pvN=1;
           if(pvPrior&&pvPrior[0]){ try{ pvN=(JSON.parse(pvPrior[0].content).tries||0)+1; }catch(ePv){ pvN=1; } }
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
               source:pvSrc,
               acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260703\u2b21',
@@ -336,8 +358,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // phantoming without ever failing outright would never shelve. Same
           // cap, same shelf action, same counter key, now enforced here too.
           if(pvN>=3){
-            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            await fetch(QT()+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:qwh(),
                body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+pvN+' straight phantom commits. Needs Brandon or a respec.',type:'GIVE_UP'});
           }
@@ -357,8 +379,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // next try resumes that same PR (CANEW reuses it) instead of duplicating.
       if(buildResp&&!buildResp.ok&&buildResp.reason==='pr_open_gates_pending'&&buildResp.pr){
         try{
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_PR_OPEN',
               source:task.source+'.PR_OPEN.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_PR_OPEN:'+(task.label||'task')+':20260716\u2b21',
@@ -370,8 +392,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       }
       if(buildResp&&buildResp.ok&&!buildResp.sha){
         try{
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_INCOMPLETE',
               source:task.source+'.INCOMPLETE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_INCOMPLETE:'+(task.label||'task')+':20260702\u2b21',
@@ -390,8 +412,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         // own source, the moment PAI reports a real ok. span.query v11 (same
         // dated fix, aibebase side) matches exactly this and nothing looser.
         try{
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_DONE',
               source:task.source+'.DONE.'+Date.now(),
               acl_stamp:'\u2b21B:eanew.cycle:TASK_DONE:'+(task.label||'task')+':20260702\u2b21',
@@ -414,8 +436,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           // lower importance below the cutoff, invisible to /span/next-task no
           // matter how many cycles ran. Same PATCH pattern already used for
           // TASK_HELD below -- terminal-state UPDATE, never a DELETE on a BEAD.
-          await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-            {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT()+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+            {method:'PATCH',headers:qwh(),
              body:JSON.stringify({stamp_type:'TASK_DONE'})}).catch(function(){});
         }catch(eDone){}
       }
@@ -432,14 +454,14 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         try{
           var GIVE_UP_AT=3;
           var trySrc='eanew.giveup.'+task.source;
-          var priorTries=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(trySrc)+'&select=content&order=created_at.desc&limit=1',
-            {headers:{apikey:BK,Authorization:'Bearer '+BK,'Accept-Profile':'abacia_core'}})
+          var priorTries=await fetch(QT()+'?stamp_type=eq.GIVE_UP_TRY&source=eq.'+encodeURIComponent(trySrc)+'&select=content&order=created_at.desc&limit=1',
+            {headers:qrh()})
             .then(function(x){return x.ok?x.json():[];}).catch(function(){return [];});
           var n=1;
           if(priorTries&&priorTries[0]){ try{ n=(JSON.parse(priorTries[0].content).tries||0)+1; }catch(e){ n=1; } }
           // Supersede the try-counter (terminal-state UPDATE style: newest wins on read)
-          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
-            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+          await fetch(QT(),{method:'POST',
+            headers:qwh(),
             body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'GIVE_UP_TRY',
               source:trySrc,
               acl_stamp:'\u2b21B:eanew.giveup:GIVE_UP_TRY:'+(task.label||'task')+':20260702\u2b21',
@@ -449,8 +471,8 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
           if(n>=GIVE_UP_AT){
             // Set the task aside so the queue advances. PATCH to TASK_HELD --
             // terminal state via update, never a DELETE on a BEAD.
-            await fetch(BU+'/rest/v1/aibe_brain?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
-              {method:'PATCH',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            await fetch(QT()+'?source=eq.'+encodeURIComponent(task.source)+'&stamp_type=eq.TASK',
+              {method:'PATCH',headers:qwh(),
                body:JSON.stringify({stamp_type:'TASK_HELD'})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+n+' failed builds (last: '+((buildResp&&buildResp.verdict)||'not_ok')+'). Needs Brandon or a respec.',type:'GIVE_UP'});
           }
