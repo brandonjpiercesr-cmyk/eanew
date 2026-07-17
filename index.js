@@ -105,6 +105,23 @@ async function _cycleBody(){
   // ⬡B:eanew.cycle:WIRE:span_to_canew_build:20260623⬡
   // CANEW has no /drain endpoint. EANEW reads SPAN queue and calls /canew/build per task.
   try{
+    // ⬡B:eanew.cycle:WIRE:task_lane_kill_switch:20260717⬡
+    // This loop had no off switch. On 20260717 it ran 235 builds against one
+    // task in 12h and there was no way to stop it except suspending the whole
+    // service, which would have taken A'NU's intelligence down with it. A loop
+    // that can spend money and open PRs must be stoppable by itself.
+    // Also the real reason it is needed today: a task is only shelved after 3
+    // failed builds, and a failed build is judged by the gate verdict. When
+    // GitHub Actions minutes are exhausted the gates fail in 3s with zero steps
+    // and no runner, which is not a verdict on the code at all. Draining the
+    // queue against dead gates would shelve every remaining task on a false
+    // signal. Set TASK_LANE_ENABLED=false to park the dispatcher; the watcher,
+    // reminders, healing and reconciliation all keep running.
+    // Default is enabled, so with no env set this behaves exactly as before.
+    if(process.env.TASK_LANE_ENABLED==='false'){
+      r.checks.tasks={drained:0,parked:true,reason:'TASK_LANE_ENABLED=false'};
+      throw {__parked:true};
+    }
     var BODY_URL_ENV=process.env.AIBEBASE_URL||'https://aibebase.onrender.com';
     // ⬡B:eanew.cycle:FIX:span_post:20260623⬡ /span/next-task is POST not GET
 var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hamUid:HAM_UID})}).then(function(x){return x.ok?x.json():null;}).catch(function(){return null;});
@@ -558,7 +575,10 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       }
     }
   }catch(e){
-    if (e && e.collisionGuardHeld) { r.checks.tasks = { drained: 0, note: 'collision_guard_held', targetFile: e.targetFile, ownedBy: e.ownedBy }; }
+    // ⬡B:eanew.cycle:WIRE:task_lane_kill_switch:20260717⬡ parked is a clean
+    // exit, not an error; r.checks.tasks is already set by the guard above.
+    if (e && e.__parked) { /* dispatcher parked by TASK_LANE_ENABLED=false */ }
+    else if (e && e.collisionGuardHeld) { r.checks.tasks = { drained: 0, note: 'collision_guard_held', targetFile: e.targetFile, ownedBy: e.ownedBy }; }
     else { r.checks.tasks = { err: (e && e.message) || String(e) }; }
   }
   // 3. Service health
