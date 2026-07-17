@@ -350,6 +350,24 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
       // the repo (sha null) -- the queue believed work existed that does not.
       // DONE now requires buildResp.sha. An ok session without a commit stamps
       // TASK_INCOMPLETE instead, keeping the task pending and the record honest.
+      // \u2b21B:eanew.cycle:WIRE:pr_open_is_pending_not_failure:20260716\u2b21
+      // Option A, founder-authorized: builds now ride PRs through the gates.
+      // A PR still waiting on its checks is neither done nor failed -- stamp
+      // it as open so the record shows exactly where the work is riding; the
+      // next try resumes that same PR (CANEW reuses it) instead of duplicating.
+      if(buildResp&&!buildResp.ok&&buildResp.reason==='pr_open_gates_pending'&&buildResp.pr){
+        try{
+          await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
+            headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Profile':'abacia_core','Content-Type':'application/json',Prefer:'return=minimal'},
+            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'TASK_PR_OPEN',
+              source:task.source+'.PR_OPEN.'+Date.now(),
+              acl_stamp:'\u2b21B:eanew.cycle:TASK_PR_OPEN:'+(task.label||'task')+':20260716\u2b21',
+              summary:'[TASK_PR_OPEN] '+task.source+' -- build riding PR #'+buildResp.pr+', gates still running; not done, not failed.',
+              content:JSON.stringify({task:task.source,pr:buildResp.pr,branch:buildResp.branch||null}),
+              importance:6})
+          }).catch(function(){});
+        }catch(ePr){}
+      }
       if(buildResp&&buildResp.ok&&!buildResp.sha){
         try{
           await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
