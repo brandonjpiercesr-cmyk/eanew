@@ -2,6 +2,10 @@
 // EANEW -- E.A.NEW. Master C4/C5 watcher. Always-on Render service.
 // Doctrine: THE BIND (20260617). Built as Render service 20260617.
 // Every 3 min: checks AIR, drains CANEW tasks, heals broken deploys, checks Life Flex.
+// ⬡B:index:WIRE:provider_boundary_installed_first:20260717⬡
+// The last groq door closes. Reroutes banned providers to Qwen before any model call.
+require('./provider.boundary.js').install();
+
 var express=require('express'); var app=express(); app.use(express.json());
 
 // ⬡B:eanew.audit:FIX:unauthenticated_endpoints_that_deploy_and_rollback_code:20260708⬡
