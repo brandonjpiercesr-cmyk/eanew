@@ -393,10 +393,10 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             // queue advances; the difference is nothing is ever silently lost.
             await stamp({stamp_type:'TASK_ESCALATED',importance:9,
               source:'eanew.escalation.'+task.source,
-              summary:'[ESCALATED TO A\u2019NU, consult CODA] '+task.source+' failed 3/3. Needs deliberation, not retry.',
+              summary:'Boss, I tried this one three times and it keeps failing the same check, so I am bringing it to you instead of throwing good tries after bad. I would rather we look at it together than have me keep guessing.',
               content:JSON.stringify({task:task.source,repo:(task.spec&&task.spec.repo)||task.repo||null,
                 lastVerdict:(typeof fb!=='undefined'&&fb&&fb.lastVerdict)?String(fb.lastVerdict).slice(0,1200):null,
-                ask:'CODA: read the last verdict, decide fix vs respec vs kill. Do not blind-retry.',
+                ask:'Here is where I landed. The same gate stopped me all three times, and the last verdict is saved right here so we are not working blind. I think the honest options are to fix the one thing it keeps catching, rewrite the task so it asks for something buildable, or decide it is not worth building right now, and I would like your read before I touch it again.',
                 escalated_by:'eanew.giveup.3of3',at:new Date().toISOString()})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+pvN+' straight phantom commits. Needs Brandon or a respec.',type:'GIVE_UP'});
           }
@@ -522,10 +522,10 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             // queue advances; the difference is nothing is ever silently lost.
             await stamp({stamp_type:'TASK_ESCALATED',importance:9,
               source:'eanew.escalation.'+task.source,
-              summary:'[ESCALATED TO A\u2019NU, consult CODA] '+task.source+' failed 3/3. Needs deliberation, not retry.',
+              summary:'Boss, I tried this one three times and it keeps failing the same check, so I am bringing it to you instead of throwing good tries after bad. I would rather we look at it together than have me keep guessing.',
               content:JSON.stringify({task:task.source,repo:(task.spec&&task.spec.repo)||task.repo||null,
                 lastVerdict:(typeof fb!=='undefined'&&fb&&fb.lastVerdict)?String(fb.lastVerdict).slice(0,1200):null,
-                ask:'CODA: read the last verdict, decide fix vs respec vs kill. Do not blind-retry.',
+                ask:'Here is where I landed. The same gate stopped me all three times, and the last verdict is saved right here so we are not working blind. I think the honest options are to fix the one thing it keeps catching, rewrite the task so it asks for something buildable, or decide it is not worth building right now, and I would like your read before I touch it again.',
                 escalated_by:'eanew.giveup.3of3',at:new Date().toISOString()})}).catch(function(){});
             await stamp({summary:'[EANEW SET ASIDE] '+task.source+' held after '+n+' failed builds (last: '+((buildResp&&buildResp.verdict)||'not_ok')+'). Needs Brandon or a respec.',type:'GIVE_UP'});
           }
