@@ -46,6 +46,7 @@ var QBU=process.env.MEMORY_BANK_URL||process.env.AIBE_BRAIN_URL;
 var QBK=process.env.MEMORY_BANK_KEY||process.env.AIBE_BRAIN_KEY;
 var QTBL=process.env.BEAD_TABLE||'aibe_brain';
 var QSCH=process.env.BEAD_SCHEMA||'abacia_core';
+var serviceAlert=require('./core/caretaker/service-alert.js');
 function QT(){return QBU+'/rest/v1/'+QTBL;}
 function qrh(){return {apikey:QBK,Authorization:'Bearer '+QBK,'Accept-Profile':QSCH};}
 function qwh(){return {apikey:QBK,Authorization:'Bearer '+QBK,'Content-Profile':QSCH,'Content-Type':'application/json',Prefer:'return=minimal'};}
@@ -959,9 +960,11 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
   // CLAIR single-writer, re-applied 20260702: retired the SECOND MINUTES writer.
   // runofshow.stampMinutes() writes the first-person one every cycle; two writers
   // per cycle = duplicate beads + doubled storage. One writer.
-  // ⬡B:eanew.cycle:SELF_HEAL:check_own_deploys_fix_notify:20260630⬡
-  // The caretaker checks her own services each cycle. If one crashed, she reads
-  // the logs, finds the fix, commits it, redeploys, and texts Brandon. No CLAIR.
+  // ⬡B:eanew.cycle:FIX:durable_reach_submission_not_provider_loop:20260720⬡
+  // The caretaker observes exact failed deploys. One immutable incident enters
+  // A'NU's committed cycle handoff; canonical REACH/WREN alone decides whether,
+  // when, and how it reaches a human. Repeated polls and restarts read the same
+  // terminal receipt and hold instead of manufacturing another effect.
   try {
     var RK = process.env.RENDER_API_KEY;
     if (RK) {
@@ -972,6 +975,7 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         { name: 'canew', id: process.env.CANEW_SERVICE_ID || 'srv-d8ojn1pkh4rs738viseg' }
       ];
       var healSummary = [];
+      var serviceIncidents = [];
       for (var w = 0; w < watched.length; w++) {
         var svc = watched[w];
         try {
@@ -979,37 +983,43 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             { headers: { Authorization: 'Bearer ' + RK, Accept: 'application/json' } })
             .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
           var dep = deps && deps[0] ? (deps[0].deploy || deps[0]) : null;
-          if (dep && /fail|crash|canceled/i.test(dep.status || '')) {
-            // She found a broken deploy — surface it. (Full read-fix-redeploy is the PAI tool path.)
-            healSummary.push(svc.name + ':' + dep.status);
+          var terminalStatus = String(dep && dep.status || '').toLowerCase()
+            .replace(/cancelled/g,'canceled');
+          if (dep && ['build_failed','update_failed','canceled'].indexOf(terminalStatus) >= 0) {
+            healSummary.push(svc.name + ':' + terminalStatus);
+            serviceIncidents.push({ hamUid:HAM_UID, serviceId:svc.id,
+              serviceName:svc.name, deployId:dep.id, status:terminalStatus,
+              commitId:dep.commit&&dep.commit.id||null,
+              deployCreatedAt:dep.createdAt||null });
           }
         } catch(eSvc) {}
       }
       if (healSummary.length) {
         r.checks.unhealthy = healSummary;
-        // Surface to Brandon — she reaches out herself
-        try {
-          var BLOOIO_KEY = process.env.BLOOIO_API_KEY;
-          if (BLOOIO_KEY && BU && BK) {
-            var phoneRows = await fetch(BU + '/rest/v1/aibe_brain?stamp_type=eq.HAM_IDENTIFIER&ham_uid=eq.' + HAM_UID + '&limit=3',
-              { headers: { apikey: BK, Authorization: 'Bearer ' + BK, 'Accept-Profile': 'abacia_core' } })
-              .then(function(x){ return x.ok ? x.json() : []; }).catch(function(){ return []; });
-            var ph = null;
-            for (var p = 0; p < (phoneRows||[]).length; p++) {
-              var m = (phoneRows[p].content||'').match(/\+?1?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/);
-              if (m) { ph = m[0].replace(/[^\d+]/g,''); if (ph.length===10) ph='+1'+ph; break; }
-            }
-            if (ph) {
-              await fetch('https://backend.blooio.com/v2/api/chats/' + encodeURIComponent(ph) + '/messages', {
-                method: 'POST',
-                headers: { Authorization: 'Bearer ' + BLOOIO_KEY, 'Content-Type': 'application/json',
-                           'Idempotency-Key': HAM_UID + '.heal.' + Date.now() },
-                body: JSON.stringify({ text: 'Heads up. I caught a service issue this cycle: ' + healSummary.join(', ') + '. Looking into it.' })
-              }).catch(function(){});
-              r.checks.notified = true;
-            }
-          }
-        } catch(eNotify) {}
+        r.checks.serviceAlerts = [];
+        var alertResults = await serviceAlert.submitServiceAlerts(serviceIncidents, {
+          baseUrl:BODY_URL,key:process.env.MEMORY_BANK_KEY||process.env.AIBE_BRAIN_KEY,
+          fetch:fetch,timeoutMs:45000
+        });
+        for (var alertIndex = 0; alertIndex < serviceIncidents.length; alertIndex++) {
+          var alertResult = alertResults[alertIndex] || { reachSubmitted:false,
+            duplicateHeld:false,pending:true,reason:'reach_incident_batch_result_missing' };
+          r.checks.serviceAlerts.push({ service:serviceIncidents[alertIndex].serviceName,
+            deployId:serviceIncidents[alertIndex].deployId,
+            status:serviceIncidents[alertIndex].status,
+            reachSubmitted:alertResult.reachSubmitted === true,
+            duplicateHeld:alertResult.duplicateHeld === true,
+            pending:alertResult.pending === true,
+            reason:alertResult.reason || null,
+            incidentSource:alertResult.incidentSource || null,
+            terminalSource:alertResult.terminalSource || null });
+        }
+        r.checks.reachSubmitted = r.checks.serviceAlerts.filter(function(a){
+          return a.reachSubmitted;
+        }).length;
+        r.checks.duplicateHeld = r.checks.serviceAlerts.filter(function(a){
+          return a.duplicateHeld;
+        }).length;
       } else {
         r.checks.allHealthy = true;
       }
