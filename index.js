@@ -914,7 +914,13 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
             content:JSON.stringify({loopFlags:loopFlags}),importance:9})
         }).catch(function(){});
       }
-      var lastRecon=await fetch(BU+'/rest/v1/aibe_brain?stamp_type=eq.RECONCILIATION&order=created_at.desc&limit=1',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
+      // ⬡B:eanew.reconciliation:FIX:alert_never_reset_the_24h_clock:20260721⬡
+      // Great Reset audit F1, the dedup bleed: this gate read only stamp_type
+      // RECONCILIATION, but the stale branch below stamps an ALERT. While any
+      // station stayed stale the clock never reset, so the same ALERT restamped
+      // every cycle (180s), ~480 duplicate rows a day. The gate now keys on the
+      // shared source prefix so BOTH outcomes reset the 24h clock.
+      var lastRecon=await fetch(BU+'/rest/v1/aibe_brain?source=like.eanew.reconciliation.*&order=created_at.desc&limit=1&select=created_at,stamp_type,content',{headers:bh()}).then(function(x){return x.json();}).catch(function(){return [];});
       var lastReconAt=lastRecon&&lastRecon[0]?new Date(lastRecon[0].created_at).getTime():0;
       var hoursSinceRecon=(Date.now()-lastReconAt)/3600000;
       if(hoursSinceRecon>=24){
@@ -928,13 +934,28 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
         }
         var stale=staleness.filter(function(s){return s.hoursSinceLastReport===null||s.hoursSinceLastReport>48;});
         if(stale.length>0){
+          // \u2b21B:eanew.reconciliation:FIX:alert_on_transition_only_route_to_coda:20260721\u2b21
+          // Founder law: alerts are state transitions, not heartbeats, and they
+          // route to CODA's fix queue, never to the founder. If the stale set is
+          // unchanged from the last stamp, record a quiet low-importance
+          // RECONCILIATION (still resets the clock); a NEW or changed stale set
+          // stamps the real ALERT with routed_to CODA.
+          var prevStale=[];
+          try{var pc=JSON.parse((lastRecon&&lastRecon[0]&&lastRecon[0].content)||'{}');prevStale=(pc.staleStations||[]).map(function(s){return s.station;}).sort();}catch(ePrev){}
+          var nowStale=stale.map(function(s){return s.station;}).sort();
+          var unchanged=prevStale.length===nowStale.length&&prevStale.join(',')===nowStale.join(',');
           await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
             headers:Object.assign({},bh(),{'Content-Type':'application/json','Content-Profile':'abacia_core',Prefer:'return=minimal'}),
-            body:JSON.stringify({ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
+            body:JSON.stringify(unchanged?{ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'RECONCILIATION',
+              acl_stamp:'\u2b21B:eanew.reconciliation:RECONCILIATION:stale_unchanged:'+Date.now()+'\u2b21',
+              source:'eanew.reconciliation.'+Date.now(),
+              summary:'[STATION RECONCILIATION] unchanged: '+stale.length+' station(s) still silent, no new alert',
+              content:JSON.stringify({allStations:staleness,staleStations:stale,unchanged:true,routed_to:'CODA_FIX_QUEUE'}),importance:3}
+            :{ham_uid:HAM_UID,agent_global:'EANEW',stamp_type:'ALERT',
               acl_stamp:'\u2b21B:eanew.reconciliation:ALERT:stale_station:'+Date.now()+'\u2b21',
               source:'eanew.reconciliation.'+Date.now(),
               summary:'[STATION RECONCILIATION] '+stale.length+' station(s) silent 48h+: '+stale.map(function(s){return s.station;}).join(', '),
-              content:JSON.stringify({allStations:staleness,staleStations:stale}),importance:8})
+              content:JSON.stringify({allStations:staleness,staleStations:stale,routed_to:'CODA_FIX_QUEUE'}),importance:8})
           }).catch(function(){});
         } else {
           await fetch(BU+'/rest/v1/aibe_brain',{method:'POST',
