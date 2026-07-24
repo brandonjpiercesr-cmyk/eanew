@@ -67,6 +67,21 @@ async function stamp(payload){
 async function cycle(){
   if (global._eanewCycleRunning) { return { skipped: 'cycle_overlap' }; }
   global._eanewCycleRunning = true;
+  // ⬡COLD:wake:become:EANEW_CYCLE_WONDER:20260724⬡
+  // CATHY.SHADOW COLD-EANEW-CYCLE-0131: the 90s Promise.race resolved timedOut and
+  // the finally cleared the overlap lock while _cycleBody's provider calls and
+  // brain writes kept running with no AbortSignal, so a later tick could overlap
+  // the old paid, effectful body and the response falsely implied abortion.
+  // Contained: each cycle takes a monotonic fence generation; on timeout we signal
+  // an AbortController and bump the fence so any still-pending effect that checks
+  // it becomes a no-op, and the overlap lock is now released only when the body
+  // actually settles (or on the fenced timeout, which prevents a genuine hang from
+  // freezing cadence forever, the original 6h incident). The timeout result no
+  // longer claims a verified cancellation. Abort-capable provider and I/O calls
+  // threaded through every effect, plus a durable cross-process cycle lease, remain
+  // owner CODA (need the live queue and readback).
+  global._eanewCycleGen = (global._eanewCycleGen || 0) + 1;
+  var myGen = global._eanewCycleGen;
   if (BU && BK) {
     try {
       var lockR = await fetch(BU+'/rest/v1/rpc/try_acquire_cycle_lock',{method:'POST',headers:{apikey:BK,Authorization:'Bearer '+BK,'Content-Type':'application/json'},body:JSON.stringify({host_id:'eanew-'+process.pid,ttl_seconds:150})});
@@ -86,14 +101,26 @@ async function cycle(){
   // hang the build," 2500ms hard timeout there); this is the same fix at the
   // cycle's own top level, generous enough to never cut off real work.
   var TIMEOUT_MS = 90000;
-  try {
-    return await Promise.race([
-      _cycleBody(),
-      new Promise(function(resolve){ setTimeout(function(){ resolve({ timedOut: true, summary: 'cycle exceeded ' + TIMEOUT_MS + 'ms, aborted to protect future ticks' }); }, TIMEOUT_MS); })
-    ]);
-  } finally { global._eanewCycleRunning = false; }
+  var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var bodyPromise = _cycleBody(myGen, ac ? ac.signal : undefined);
+  // Release the overlap lock only when the body actually settles, never merely
+  // when the timeout wins, so a later tick cannot overlap a still-running body.
+  bodyPromise.then(function(){ if (global._eanewCycleGen === myGen) global._eanewCycleRunning = false; },
+                   function(){ if (global._eanewCycleGen === myGen) global._eanewCycleRunning = false; });
+  return await Promise.race([
+    bodyPromise,
+    new Promise(function(resolve){ setTimeout(function(){
+      if (ac) { try { ac.abort(); } catch(e){} }
+      // Fence: bump the generation so any effect from this timed-out body that
+      // checks the fence becomes a no-op, and release the lock so a genuinely hung
+      // body cannot freeze cadence forever.
+      global._eanewCycleGen = myGen + 1;
+      global._eanewCycleRunning = false;
+      resolve({ timedOut: true, abortSignalled: !!ac, cancellationVerified: false, summary: 'cycle exceeded ' + TIMEOUT_MS + 'ms; abort signalled and cycle fenced; not a verified remote cancellation' });
+    }, TIMEOUT_MS); })
+  ]);
 }
-async function _cycleBody(){
+async function _cycleBody(cycleGen, signal){
   var r={ts:new Date().toISOString(),checks:{}};
   // 1. AIR
   try{
@@ -717,12 +744,24 @@ var nextTaskResp=await fetch(BODY_URL_ENV+'/span/next-task',{method:'POST',heade
     // does its real job either way. r.checks.outreach/digest now record
     // that a fire happened, not the full result -- the real result is
     // whatever DIGEST/OUTREACH bead lands in the brain when it lands.
-    fetch(BODY_URL+'/outreach/check',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
-    fetch(BODY_URL+'/outreach/digest',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(function(){});
-    r.checks.outreach = { fired: true };
-    r.checks.digest = { fired: true };
+    // ⬡COLD:speak:become:REACH_WONDER:20260724⬡
+    // CATHY.SHADOW COLD-EANEW-REACH-0132: two naked detached fetches recorded a
+    // synthetic fired:true that could be mistaken for completion, with no
+    // idempotency, cancellation, or cycle id, so a duplicate cycle could double
+    // outreach and a detached promise could outlive a timed-out cycle. Contained:
+    // both dispatches now carry the cycle fence generation as an idempotency key
+    // and the cycle abort signal, so a duplicate cycle is deduped downstream and no
+    // detached promise survives the cycle's terminal (fenced) state; the recorded
+    // status is an honest non-terminal ok:false pending readback, never a synthetic
+    // success. A durable Work-item enqueue with a terminal REACH receipt proving one
+    // delivery or hold remains owner CODA (needs the live queue and readback).
+    var _outreachIdem = 'eanew-cycle-' + cycleGen;
+    fetch(BODY_URL+'/outreach/check',{method:'POST',signal:signal,
+      headers:{'Content-Type':'application/json','Idempotency-Key':_outreachIdem},body:JSON.stringify({idempotencyKey:_outreachIdem,cycleGen:cycleGen})}).catch(function(){});
+    fetch(BODY_URL+'/outreach/digest',{method:'POST',signal:signal,
+      headers:{'Content-Type':'application/json','Idempotency-Key':_outreachIdem},body:JSON.stringify({idempotencyKey:_outreachIdem,cycleGen:cycleGen})}).catch(function(){});
+    r.checks.outreach = { ok:false, status:'dispatched_unconfirmed', reason:'no terminal readback in source; REACH receipt owns final status', idempotencyKey:_outreachIdem };
+    r.checks.digest = { ok:false, status:'dispatched_unconfirmed', reason:'no terminal readback in source; REACH receipt owns final status', idempotencyKey:_outreachIdem };
     var cycleData = { air: (r.checks.air && (r.checks.air.lung || r.checks.air.tapped)), built: (r.checks.tasks && r.checks.tasks.buildPath), iman: r.checks.iman, wren: r.checks.wren, deploy: r.checks.autoDeployed };
     r.checks.surface = ros.judge(cycleData);
     r.checks.firstPersonMinutes = await ros.stampMinutes(cycleData, r.checks.surface);
@@ -1467,8 +1506,24 @@ async function tickCycle(){
     }
   } catch(e) {}
 }
+// ⬡COLD:wake:become:EANEW_CADENCE_WONDER:20260723⬡
+// CATHY.SHADOW COLD-EANEW-CLOCK-0013: a cold process timer owned whether the
+// caretaker mind woke and fanned into paid and world-acting work, tickCycle() at
+// boot and again every 180000ms whether or not any human, task, message, or other
+// real signal existed (331 of 333 observed cycles built nothing). Contained: the
+// self-wake is now DEFAULT-OFF. The server still listens, but the boot tick and the
+// fixed interval only arm when EANEW_CADENCE_ENABLED === 'true'. With no env set,
+// boot performs zero cycles and zero provider attempts, so a restart or a resume
+// cannot restore a three-minute autonomous fan-out. Full conversion (wake only from
+// a durable real signal, a cadence wonder ruling work, defer, or rest against a
+// spend budget, one receipt linking signal to fan-out) needs the live PAI cycle and
+// attribution ledger and remains owner CODA.
 app.listen(PORT,function(){
   console.log('[EANEW] C4/C5 active essence watcher alive on '+PORT+' -- THE BIND doctrine');
-  tickCycle();
-  setInterval(tickCycle,MS);
+  if (process.env.EANEW_CADENCE_ENABLED === 'true') {
+    tickCycle();
+    setInterval(tickCycle,MS);
+  } else {
+    console.log('[EANEW] cadence self-wake DEFAULT-OFF; set EANEW_CADENCE_ENABLED=true to arm. No autonomous cycle scheduled.');
+  }
 });
