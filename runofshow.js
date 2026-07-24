@@ -37,8 +37,17 @@ async function checkAdvisors() {
   return status;
 }
 
-// Judgment layer: decide what needs Brandon's eyes
+// ⬡COLD:decide:become:DAILY_BRIEFING_WONDER:20260724⬡
+// CATHY.SHADOW COLD-EANEW-REPORT-0133: fixed booleans and status comparisons
+// cold-decided which mail, SMS, deploy, and advisor facts deserved founder eyes,
+// with no HAM preferences and no council context. Contained: this layer now
+// returns CANDIDATE facts only, never a final founder-attention authority. Final
+// disposition (weighed against HAM preferences and a cost ceiling, held when the
+// cycle is unavailable, each line citing its evidence and cycle receipt) belongs
+// to DAILY_BRIEFING_WONDER through the PAI cycle and remains owner CODA.
 function judge(cycleData) {
+  // Candidate facts only. These are proposals for the cycle to weigh, not a
+  // cold ruling on what the founder must see.
   const surface = [];
   if (cycleData.iman && cycleData.iman.newMail > 0) surface.push('New advisor email: ' + cycleData.iman.newMail);
   if (cycleData.wren && cycleData.wren.newSms > 0) surface.push('New SMS: ' + cycleData.wren.newSms);
@@ -68,6 +77,16 @@ async function loadVoiceDoctrine() {
 }
 
 async function composeChatter(cycleData, surface) {
+  // ⬡COLD:speak:become:EANEW_CYCLE_REPORT_WONDER:20260723⬡
+  // CATHY.SHADOW COLD-EANEW-CLOCK-0014: this paid first-person composition fired
+  // on EVERY completed cycle, so 331 of 333 observed cycles that built nothing and
+  // surfaced nothing still purchased a model sentence, coupling cadence to voice.
+  // Contained: an empty cycle (no build, no new mail, no surfaced item) now short
+  // circuits to zero model calls and no first-person prose. A meaningful cycle can
+  // still compose one report. Full separation into a governed cycle-report wonder
+  // with a declared requesting audience and durable provider attribution (the
+  // deployed boundary bills this Groq-shaped call through OpenRouter, so a
+  // component-specific credential is still needed) remains owner CODA.
   const GROQ = process.env.GROQ_API_KEY;
   const facts = {
     air: cycleData.air ? 'flowing' : 'still',
@@ -75,6 +94,8 @@ async function composeChatter(cycleData, surface) {
     newMail: (cycleData.iman && cycleData.iman.newMail) || 0,
     surfaceItems: surface || []
   };
+  const meaningful = !!facts.built || facts.newMail > 0 || (facts.surfaceItems && facts.surfaceItems.length > 0);
+  if (!meaningful) return null; // empty cycle: no paid thought, no prose
   if (!GROQ) return null;
   const voice = await loadVoiceDoctrine();
   const voiceLine = voice ? ('Your voice: ' + voice) : '';
@@ -101,25 +122,36 @@ async function composeChatter(cycleData, surface) {
   } catch (e) { return null; }
 }
 
+// ⬡COLD:remember:become:DAILY_BRIEFING_WONDER:20260724⬡
+// CATHY.SHADOW COLD-EANEW-MEMORY-0134: this composed a founder-named cold fallback
+// sentence (a real person leaked as a literal) and wrote a literal HAM to the
+// retired AIBE brain, swallowing the failure and never reading back. Contained per
+// the founder identity law: the HAM is env-only with no literal fallback (a
+// `|| 'literal'` default is still a leak); the cold founder-named fallback prose is
+// removed so no cold sentence impersonates the PAI voice; a missing identity, a
+// missing brain, or a failed write now returns ok:false with a typed reason instead
+// of a swallowed silent success. Routing this through the canonical memory_bank
+// writer with supersede-and-readback and PAI-cycle composition remains owner CODA.
 async function stampMinutes(cycleData, surface) {
   const ts = Date.now();
   const built = cycleData.built || 'nothing new';
-  let chatter = await composeChatter(cycleData, surface);
-  let real = true;
+  const chatter = await composeChatter(cycleData, surface);
   if (!chatter) {
-    real = false;
-    const parts = [];
-    parts.push('This cycle I checked the air and it was ' + (cycleData.air ? 'flowing' : 'still') + '.');
-    if (cycleData.built) parts.push('I dispatched a build and it landed: ' + cycleData.built + '.');
-    if (cycleData.iman && cycleData.iman.newMail > 0) parts.push('Saw ' + cycleData.iman.newMail + ' new emails in the advisor inboxes.');
-    if (surface.length) parts.push('Flagging for Brandon: ' + surface.join('; ') + '.');
-    else parts.push('Nothing needs Brandon right now, everything is steady.');
-    chatter = parts.join(' ');
+    // No meaningful, model-composed report this cycle. No cold fallback sentence,
+    // no founder name leaked, no paid impersonation of the one voice.
+    return { ok: false, reason: 'no meaningful report composed for this cycle', ts: ts };
+  }
+  const ham = process.env.HAM_UID || process.env.FOUNDER_HAM_UID;
+  if (!BU || !BK || !ham) {
+    return { ok: false, reason: 'identity or brain unavailable; refusing literal-HAM retired-brain write', ts: ts };
   }
   try {
-    await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: 'DC499D0C', agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, real: real, surface: surface, built: built, ts: ts }) }) });
-  } catch(e) {}
-  return chatter;
+    const w = await fetch(BU + '/rest/v1/aibe_brain', { method: 'POST', headers: Object.assign({}, bh(), { 'Content-Profile': 'abacia_core', 'Content-Type': 'application/json', Prefer: 'return=minimal' }), body: JSON.stringify({ ham_uid: ham, agent_global: 'EANEW', stamp_type: 'MINUTES', source: 'eanew.minutes.' + ts, acl_stamp: 'MINUTES' + ts, importance: 7, summary: '[MINUTES] ' + chatter.slice(0, 80), content: JSON.stringify({ chatter: chatter, real: true, surface: surface, built: built, ts: ts }) }) });
+    if (!w || !w.ok) { return { ok: false, reason: 'brain write failed', status: (w && w.status) || null, ts: ts }; }
+    return { ok: true, chatter: chatter, ts: ts };
+  } catch (e) {
+    return { ok: false, reason: 'brain write threw: ' + e.message, ts: ts };
+  }
 }
 
 
